@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
-import { sendSuccess, errorResponse, handleError } from "../utils/responseHandler.js";
-import Order from "../models/order.model.js";
+import { sendError, handleError } from "../helpers/error.helper.js";
+import { sendSuccess } from "../helpers/response.helper.js";
+import Order from "../models/ecommarace/order.model.js";
 
 export const razorpayWebhook = async (req, res) => {
   const session = await mongoose.startSession();
@@ -9,9 +10,8 @@ export const razorpayWebhook = async (req, res) => {
 
   try {
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-
     if (!webhookSecret) {
-      return errorResponse(res, {
+      return sendError(res, {
         message: "Webhook secret not configured",
         statusCode: 500,
       });
@@ -20,7 +20,7 @@ export const razorpayWebhook = async (req, res) => {
     const razorpaySignature = req.headers["x-razorpay-signature"];
 
     if (!razorpaySignature) {
-      return errorResponse(res, {
+      return sendError(res, {
         message: "Signature missing",
         statusCode: 401,
       });
@@ -36,7 +36,7 @@ export const razorpayWebhook = async (req, res) => {
       .digest("hex");
 
     if (expectedSignature !== razorpaySignature) {
-      return errorResponse(res, {
+      return sendError(res, {
         message: "Invalid webhook signature",
         statusCode: 401,
       });
@@ -63,7 +63,6 @@ export const razorpayWebhook = async (req, res) => {
         if (!refund) {
           throw new Error("Invalid refund payload");
         }
-
         const razorpayRefundId = refund.id;
         const razorpayPaymentId = refund.payment_id;
         const refundAmount = refund.amount / 100;
@@ -90,18 +89,15 @@ export const razorpayWebhook = async (req, res) => {
 
             return sendSuccess(res, {}, 200, "Refund already processed");
           }
-
           order.razorpayRefundId = razorpayRefundId;
 
           // accumulate refunds safely
           order.refundAmount = (order.refundAmount || 0) + refundAmount;
-
           if (order.refundAmount >= order.grandTotal) {
             order.paymentStatus = "refunded";
           } else {
             order.paymentStatus = "partially_refunded";
           }
-
           order.refundedAt = new Date();
         }
 

@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { EmployeeRecord } from "../../models/manage/employee.model.js";
+import  EmployeeRecord  from "../../models/manage/employee.model.js";
 import { v6 as uuidv6 } from "uuid";
 
 export const autoAbsentCronJob = () => {

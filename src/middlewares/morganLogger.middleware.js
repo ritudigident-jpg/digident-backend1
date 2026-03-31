@@ -1,6 +1,6 @@
 import morgan from "morgan";
 import chalk from "chalk";
-import { getISTTime } from "../utils/time.js";
+import { getISTTime } from "../helpers/time.helper.js";
 
 /**
  * @function morganMiddleware

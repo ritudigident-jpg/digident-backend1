@@ -5,6 +5,7 @@ import connectDB from "./src/config/db.config.js";
 import userRoutes from "./src/routes/ecommarace/user.routes.js";
 import setupPassport from "./src/config/passport.js";
 import cookieParser from "cookie-parser";
+import env from "dotenv";
 
 import addressRoutes from "./src/routes/ecommarace/address.routes.js";
 import employeeRoutes from "./src/routes/manage/employee.routes.js";
@@ -25,6 +26,13 @@ import orderRoutes from "./src/routes/ecommarace/order.routes.js"
 import oauthRouter from "./src/routes/zoho/auth.routes.js"
 import librarylogRoutes from "./src/routes/ecommarace/librarylog.routes.js"
 import awsUploadRoutes from "./src/routes/ecommarace/aws.routes.js"
+import razorpayWebhookRoutes from "./src/routes/ecommarace/razorpaywebhook.routes.js";
+import cors from "cors";
+import {morganMiddleware} from "./src/middlewares/morganLogger.middleware.js";
+import axios from "axios";
+import { bestSellerCronJob } from "./src/config/cron/bestSeller.js";
+import { autoAbsentCronJob } from "./src/config/cron/autoMarkAbsent.js";
+import { startCouponExpiryCron } from "./src/config/cron/couponExpiryCron.js";
 
 dotenv.config();
 
@@ -53,16 +61,8 @@ const allowedOrigins = [
   "https://library.digident.in",
   process.env.CLIENT_URL,
 ].filter(Boolean);
-export const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ["GET", "POST"],
-  },
-});
 
 app.use("/api/webhook", razorpayWebhookRoutes);
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());

@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { Order } from "../../models/ecommarace/cart.model.js";
+import  Order  from "../../models/ecommarace/cart.model.js";
 import Product from "../../models/manage/product.model.js";
 
 export const bestSellerCronJob = () => {
