@@ -33,7 +33,55 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(passport.initialize());
 
+// Load Environment
+env.config({
+  path: `.env.${process.env.NODE_ENV || "development"}`,
+});
+app.set("trust proxy", true);
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:4000",
+  "https://shop.digident.in",
+  "https://digident.in",
+  "https://manage.digident.in",
+  "https://backend-5mo5.onrender.com",
+  "https://digident-beta.netlify.app",
+  "https://manage-beta.netlify.app",
+  "https://digident-ecommerce-beta.netlify.app",
+  "https://library.digident.in",
+  process.env.CLIENT_URL,
+].filter(Boolean);
+export const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
+});
+
+app.use("/api/webhook", razorpayWebhookRoutes);
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+app.use(morganMiddleware);
+
+app.use(passport.initialize());
 setupPassport();
+
+/* ===================== CORS ===================== */
+app.use(
+  cors({
+    origin: (origin, cb) =>
+      !origin || allowedOrigins.includes(origin)
+        ? cb(null, true)
+        : cb(new Error("CORS Blocked")),
+    credentials: true,
+  })
+);
+
 
 /* -------------------------------
    HEALTH CHECK ROUTE
@@ -108,6 +156,9 @@ app.use("/api/v1/aws", awsUploadRoutes);
 const startServer = async () => {
   try {
     await connectDB();
+     bestSellerCronJob();
+    autoAbsentCronJob();
+    startCouponExpiryCron();
 
     const PORT = process.env.PORT || 3000;
 
