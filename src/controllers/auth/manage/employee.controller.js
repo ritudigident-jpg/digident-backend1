@@ -237,7 +237,7 @@ export const changeEmployeePassword = async (req, res) => {
     const { value, error } = changePasswordValidation(req.body, {
       abortEarly: false
     });
-    if (error) {
+    if (error){
       return sendError(res, {
         message: "Validation failed",
         statusCode: 400,
@@ -597,8 +597,10 @@ export const deleteEmployee = async (req, res) => {
  * 500 - INTERNAL_SERVER_ERROR
  */
 export const updateEmployeeRole = async (req, res) => {
+  console.log("Update Employee Role Request Body:");
   try {
     const { email, role, permission } = req.body;
+    console.log("Updating role for:", email, "to role:", role, "by admin:", req.user.email, "with permission:", permission);
     if (role === undefined || ![0, 1, 2, 3, 4].includes(role)) {
       return sendError(res, {
         message: "Invalid role value",

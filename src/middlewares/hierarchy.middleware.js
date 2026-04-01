@@ -31,28 +31,23 @@ import { sendError, handleError } from "../helpers/error.helper.js";
  * 500 { success: false, message: "Internal Server Error", error: "<error_message>" } - for any server error
  */
 
-
 const hierarchyMiddleware = async (req, res, next) => {
   try {
-    /* =========================
-       FETCH LOGGED-IN EMPLOYEE
-    ========================= */
     const loggedInEmployee = await Employee.findOne({
-      email: req.user?.email,
-      isDeleted: false,
-    })
-      .select("role _id")
-      .lean();
+      email: req.user.email,
+    }).select("role _id");
 
     if (!loggedInEmployee) {
-      throw new Error("USER_NOT_FOUND");
+      return sendError(res, {
+        message: "Employee not found",
+        statusCode: 404,
+        errorCode: "EMPLOYEE_NOT_FOUND",
+      });
     }
 
     let targetRole;
 
-    /* =========================
-       CREATE (POST)
-    ========================= */
+    /* ================= CREATE ================= */
     if (req.method === "POST") {
       targetRole = req.body?.role;
 
@@ -65,30 +60,22 @@ const hierarchyMiddleware = async (req, res, next) => {
       }
     }
 
-    /* =========================
-       UPDATE / DELETE
-    ========================= */
-    if (["PUT", "PATCH", "DELETE"].includes(req.method)) {
-      const { id } = req.params;
+    /* ================= DELETE / UPDATE ================= */
+    if (req.method === "DELETE" || req.method === "PUT") {
+      const targetEmployee = await Employee.findOne({ email: req.body.email } ).select(
+        "role _id"
+      );
 
-      if (!id) {
+      if (!targetEmployee) {
         return sendError(res, {
-          message: "Employee ID is required",
-          statusCode: 400,
-          errorCode: "EMPLOYEE_ID_REQUIRED",
+          message: "Target employee not found",
+          statusCode: 404,
+          errorCode: "TARGET_EMPLOYEE_NOT_FOUND",
         });
       }
 
-      const targetEmployee = await Employee.findById(id)
-        .select("role _id")
-        .lean();
-
-      if (!targetEmployee) {
-        throw new Error("USER_NOT_FOUND");
-      }
-
-      /* ---------- SELF ACTION BLOCK ---------- */
-      if (String(loggedInEmployee._id) === String(targetEmployee._id)) {
+      // ❌ cannot act on yourself
+      if (loggedInEmployee._id.equals(targetEmployee._id)) {
         return sendError(res, {
           message: "You cannot perform this action on yourself",
           statusCode: 403,
@@ -101,25 +88,21 @@ const hierarchyMiddleware = async (req, res, next) => {
 
     const creatorRole = loggedInEmployee.role;
 
-    /* =========================
-       ROLE RULES
-    ========================= */
-
-    // ❌ Executives cannot perform actions
+    // ❌ Executives can do nothing
     if (creatorRole === 3) {
       return sendError(res, {
         message: "Executives are not allowed to perform this action",
         statusCode: 403,
-        errorCode: "INSUFFICIENT_ROLE",
+        errorCode: "EXECUTIVE_FORBIDDEN",
       });
     }
 
-    // ✅ Super Admin (0) → full access
+    // ✅ SuperAdmin can do anything
     if (creatorRole === 0) {
       return next();
     }
 
-    // ✅ Lower number = higher authority
+    // lower number = higher authority
     if (creatorRole < targetRole) {
       return next();
     }
@@ -130,8 +113,8 @@ const hierarchyMiddleware = async (req, res, next) => {
       errorCode: "HIERARCHY_VIOLATION",
     });
   } catch (error) {
+    console.error("Hierarchy middleware error:", error);
     return handleError(res, error);
   }
 };
-
 export default hierarchyMiddleware;

@@ -42,7 +42,6 @@ export const changePasswordValidation = (data) => {
     email: Joi.string().email().required(),
     password: Joi.string().min(8).required()
   });
-
   return schema.validate(data);
 };
 

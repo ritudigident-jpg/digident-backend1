@@ -91,25 +91,18 @@ export const loginEmployeeService = async (email, password) => {
 };
 
 export const changeEmployeePasswordService = async (email, password) => {
-
   const employee = await Employee.findOne({
     email,
     isDeleted: false
   });
-
   if (!employee) {
     throw new Error("EMPLOYEE_NOT_FOUND");
   }
-
   /* Update password */
-
   employee.password = password; // hashed in pre-save middleware
   employee.isNewEmployee = false;
-
   await employee.save();
-
   return employee;
-
 };
 
 export const verifyEmailService = async (token) => {
@@ -227,14 +220,14 @@ export const updateEmployeeRoleService = async (
   adminEmail,
   permission
 ) => {
-
+console.log("Updating role for:", employeeEmail, "to role:", role, "by admin:", adminEmail);
   /* Find admin */
 
   const admin = await Employee.findOne({
     email: adminEmail,
     isDeleted: false
   });
-
+console.log("Admin found:", admin);
   if (!admin) {
     throw new Error("UNAUTHORIZED_ACTION");
   }
@@ -245,6 +238,7 @@ export const updateEmployeeRoleService = async (
     email: employeeEmail,
     isDeleted: false
   });
+console.log("Employee found:", employee);
 
   if (!employee) {
     throw new Error("EMPLOYEE_NOT_FOUND");
@@ -266,7 +260,7 @@ export const updateEmployeeRoleService = async (
     actionFor: employee._id,
     action: employee.email,
 
-    permission: permission?.toLowerCase() || "update_employee",
+    permission: permission?.toLowerCase(),
     actionType: "Update"
   });
 
