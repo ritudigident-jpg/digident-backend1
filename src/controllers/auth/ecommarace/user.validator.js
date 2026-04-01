@@ -16,16 +16,11 @@ REGISTER USER VALIDATION
 export const validateRegisterBody = (data) => {
   const schema = Joi.object({
     firstName: Joi.string().trim().min(3).max(50).required(),
-
     lastName: Joi.string().trim().min(3).max(50).required(),
-
     email: Joi.string().email().lowercase().trim().required(),
-
     password: Joi.string().min(8).max(50).required(),
-
     instituteName: Joi.string().trim().min(2).max(100).required(),
   });
-
   return schema.validate(data, validationOptions);
 };
 
@@ -36,10 +31,8 @@ LOGIN VALIDATION
 export const validateLoginBody = (data) => {
   const schema = Joi.object({
     email: Joi.string().email().lowercase().trim().required(),
-
     password: Joi.string().required(),
   });
-
   return schema.validate(data, validationOptions);
 };
 
@@ -51,7 +44,6 @@ export const validateForgotPasswordBody = (data) => {
   const schema = Joi.object({
     email: Joi.string().email().lowercase().trim().required(),
   });
-
   return schema.validate(data, validationOptions);
 };
 
@@ -70,7 +62,6 @@ export const validateResetPasswordBody = (data) => {
         "string.empty": "New password is required",
         "string.min": "Password must be at least 8 characters",
       }),
-
     confirmNewPassword: Joi.string()
       .valid(Joi.ref("newPassword"))
       .required()
@@ -79,7 +70,6 @@ export const validateResetPasswordBody = (data) => {
         "string.empty": "Confirm password is required",
       }),
   });
-
   return schema.validate(data, validationOptions);
 };
 
@@ -90,14 +80,10 @@ UPDATE PROFILE VALIDATION
 export const validateUpdateProfileBody = (data) => {
   const schema = Joi.object({
     firstName: Joi.string().trim().min(2).max(50),
-
     lastName: Joi.string().trim().min(2).max(50),
-
     instituteName: Joi.string().trim().min(2).max(100),
-
     phone: Joi.string().pattern(/^[0-9]{10,15}$/),
   });
-
   return schema.validate(data, validationOptions);
 };
 
@@ -110,7 +96,6 @@ export const validateChangePasswordBody = (data) => {
     oldPassword: Joi.string().required().messages({
       "string.empty": "Old password is required",
     }),
-
     newPassword: Joi.string()
       .min(8)
       .required()
@@ -121,6 +106,5 @@ export const validateChangePasswordBody = (data) => {
         "any.invalid": "New password cannot be the same as the old password",
       }),
   });
-
   return schema.validate(data, validationOptions);
 };

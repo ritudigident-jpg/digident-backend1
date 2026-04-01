@@ -8,7 +8,7 @@ export const createEmployeeValidator = (data) => {
     personalEmail: Joi.string().email().lowercase().trim().required(),
     password: Joi.string().min(8).max(50).required(),
     role: Joi.string().required(),
-    permission: Joi.string().optional()
+    permission: Joi.string().required()
   });
   return schema.validate(data, { abortEarly: false });
 };

@@ -7,7 +7,6 @@ import bcrypt from "bcrypt";
 import { generateTokens } from "../../helpers/token.helper.js";
 
 export const createEmployeeService = async (data, adminEmail) => {
-
   const {
     firstName,
     lastName,
@@ -21,13 +20,10 @@ export const createEmployeeService = async (data, adminEmail) => {
   /* Check existing employee */
 
   const existingEmployee = await Employee.findOne({ email });
-
   if (existingEmployee) {
     throw new Error("EMPLOYEE_ALREADY_EXISTS");
   }
-
   /* Check admin */
-
   const admin = await Employee.findOne({
     email: adminEmail,
   });
@@ -46,6 +42,7 @@ export const createEmployeeService = async (data, adminEmail) => {
     password,
     personalEmail,
     role,
+    createdBy:" dharmik@digident.in",
     createdBy: adminEmail,
     isNewEmployee: true,
   });
@@ -71,7 +68,6 @@ export const createEmployeeService = async (data, adminEmail) => {
     permission: permission || "create_employee",
     actionType: "Create",
   });
-
   return newEmployee;
 };
 

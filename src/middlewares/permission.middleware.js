@@ -27,13 +27,14 @@ import { sendError, handleError } from "../helpers/error.helper.js";
  * @example
  * router.post("/some-route", authToken, checkPermission(), controllerFunction);
  */
-export const checkPermission = (requiredPermission) => {
+export const checkPermission = () => {
   return async (req, res, next) => {
     try {
       /* =========================
          VALIDATE TOKEN USER
       ========================= */
       const userEmail = req.user?.email;
+      const requiredPermission = req.body.permission; // Assuming permission is sent in request body
 
       if (!userEmail) {
         return sendError(res, {

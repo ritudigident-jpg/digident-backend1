@@ -16,7 +16,6 @@ router.post("/reset-password/:token", resetEmployeePassword);
 router.post("/forget-password", forgotEmployeePassword);
 // Update Role
 router.put("/role-update",auth,hierarchyMiddleware, checkPermission(), updateEmployeeRole); //ROLE_UPDATE
-
 //Get all employees
 router.get("/get",auth, getEmployee); // "VIEW_EMPLOYEE"
 router.get('/verify-email/:token',  verifyEmail); // "VIEW_EMPLOYEE"
@@ -28,5 +27,4 @@ router.delete("/delete/:employeeId",auth, hierarchyMiddleware, checkPermission()
 router.get( "/deleted",auth, checkPermission() , getAllDeletedEmployee); //
 // "VIEW_DELETED_EMPLOYEE"
 router.post("/refresh-token",refreshEmployeeAccessToken);
-
 export default router;
