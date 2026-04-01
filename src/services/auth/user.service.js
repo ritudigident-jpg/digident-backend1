@@ -33,7 +33,7 @@ export const registerUserService = async (data) => {
     expiresAt: Date.now() + 15 * 60 * 1000,
   };
   await user.save();
-  const verifyUrl = `${process.env.FRONTEND_URL}/user/verify-email/${token}`;
+  const verifyUrl = `${process.env.FRONTEND_URL}/verify-email/${token}`;
   const htmlBody = verifyEmailTemplate(verifyUrl, firstName);
   await sendZohoMail(email, "Verify your Email", htmlBody);
   return user;
