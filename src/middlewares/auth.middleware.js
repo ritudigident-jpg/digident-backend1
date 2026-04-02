@@ -28,7 +28,6 @@ const authToken = async (req, res, next) => {
        CHECK AUTH HEADER
     ========================= */
     const authHeader = req.headers.authorization;
-
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return sendError(res, {
         message: "Authorization token missing",
@@ -53,6 +52,7 @@ const authToken = async (req, res, next) => {
         throw new Error("TOKEN_EXPIRED");
       }
 
+      
       if (err.name === "JsonWebTokenError") {
         throw new Error("INVALID_TOKEN");
       }
@@ -67,7 +67,6 @@ const authToken = async (req, res, next) => {
       id: decoded.id,
       email: decoded.email,
     };
-
     next();
   } catch (error) {
     return handleError(res, error);

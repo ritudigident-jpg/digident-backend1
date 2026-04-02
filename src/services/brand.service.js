@@ -12,26 +12,21 @@ export const createBrandService = async ({
   employee,
   permission
 }) => {
-
   let logoUpload;
   const fileUploads = [];
-
   try {
-
-    if (!name) {
+    if(!name){
       const err = new Error("Brand name is required");
       err.statusCode = 400;
       err.errorCode = "VALIDATION_ERROR";
       throw err;
     }
-
-    if (!logoFile) {
+    if(!logoFile){
       const err = new Error("Logo is required");
       err.statusCode = 400;
       err.errorCode = "VALIDATION_ERROR";
       throw err;
     }
-
     const existingBrand = await Brand.findOne({ name });
     if (existingBrand) {
       const err = new Error("Brand already exists");
@@ -39,40 +34,32 @@ export const createBrandService = async ({
       err.errorCode = "BRAND_ALREADY_EXISTS";
       throw err;
     }
-
     /* ---------- UPLOAD LOGO ---------- */
     logoUpload = await uploadToS3(logoFile, "brands");
-
     const hasFiles = files && files.length > 0;
-
-    if (!hasFiles && categories) {
+    if(!hasFiles && categories){
       const err = new Error("Category not allowed without files");
       err.statusCode = 400;
       err.errorCode = "VALIDATION_ERROR";
       throw err;
     }
-
     /* ---------- FILE PROCESS ---------- */
     if (hasFiles) {
-
       if (!categories) {
         const err = new Error("Categories required when uploading files");
         err.statusCode = 400;
         err.errorCode = "VALIDATION_ERROR";
         throw err;
       }
-
       const categoriesArray = Array.isArray(categories)
         ? categories
         : [categories];
-
       if (categoriesArray.length !== files.length) {
         const err = new Error("Each file must have a corresponding category");
         err.statusCode = 400;
         err.errorCode = "VALIDATION_ERROR";
         throw err;
       }
-
       for (const cat of categoriesArray) {
         if (!ALLOWED_CATEGORIES.includes(cat)) {
           const err = new Error(`Invalid category: ${cat}`);
@@ -81,10 +68,8 @@ export const createBrandService = async ({
           throw err;
         }
       }
-
       for (let i = 0; i < files.length; i++) {
         const upload = await uploadToS3(files[i], "brands/file");
-
         fileUploads.push({
           fileId: uuidv6(),
           category: categoriesArray[i],
@@ -92,7 +77,6 @@ export const createBrandService = async ({
         });
       }
     }
-
     /* ---------- SAVE BRAND ---------- */
     const brand = await Brand.create({
       brandId: uuidv6(),
@@ -100,7 +84,6 @@ export const createBrandService = async ({
       logoUrl: logoUpload.url,
       files: fileUploads,
     });
-
     /* ---------- AUDIT ---------- */
     await PermissionAudit.create({
       permissionAuditId: uuidv6(),
@@ -111,18 +94,13 @@ export const createBrandService = async ({
       permission: permission || "create_brand",
       actionType: "Create",
     });
-
     return brand;
-
   } catch (error) {
-
     /* ---------- ROLLBACK ---------- */
     if (logoUpload?.url) await deleteFromS3(logoUpload.url);
-
     for (const f of fileUploads) {
       await deleteFromS3(f.fileLink);
     }
-
     throw error;
   }
 };

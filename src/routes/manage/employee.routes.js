@@ -6,7 +6,7 @@ import { checkPermission } from "../../middlewares/permission.middleware.js";
 const router = express.Router();
 // Update Role
 router.put("/role-update",auth,hierarchyMiddleware, checkPermission(), updateEmployeeRole); //ROLE_UPDATE
-router.delete( "/deleted", checkPermission(), getAllDeletedEmployee);
+router.delete("/deleted", checkPermission(), getAllDeletedEmployee);
 router.post("/create", auth,hierarchyMiddleware, checkPermission(), createEmployee ); //"CREATE_EMPLOYEE"
 // Login Employee
 router.post("/login",loginEmployee);
@@ -16,7 +16,6 @@ router.post("/logout" , auth, logoutEmployee);
 router.post("/change-password",auth,changeEmployeePassword);
 router.post("/reset-password/:token", resetEmployeePassword);
 router.post("/forget-password", forgotEmployeePassword);
-
 //Get all employees
 router.get("/get",auth, getEmployee); // "VIEW_EMPLOYEE"
 router.get('/verify-email/:token',  verifyEmail); // "VIEW_EMPLOYEE"

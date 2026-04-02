@@ -29,17 +29,11 @@ const router = express.Router();
 ================================ */
 
 router.post("/register", registerUser);
-
 router.get("/verify-email/:token", verifyEmail);
-
 router.post("/login", loginUser);
-
 router.post("/logout", logoutUser);
-
 router.post("/refresh-token", refreshAccessToken);
-
 router.post("/forget-password", forgotPassword);
-
 router.post("/reset-password/:token", resetPassword);
 
 
@@ -61,29 +55,17 @@ router.get("/microsoft/callback", microsoftCallback);
 ================================ */
 
 router.get("/me", authToken, getCurrentUser);
-
 router.get("/dashboard", authToken, getUserDashboard);
-
 router.post("/change-password", authToken, changePassword);
-
-router.put(
-  "/profile-update",
-  authToken,
-  upload.fields([{ name: "avatar", maxCount: 1 }]),
-  updateUserProfile
-);
-
+router.put("/profile-update",authToken,upload.fields([{ name: "avatar", maxCount: 1 }]),updateUserProfile);
 
 /* ===============================
    USER MANAGEMENT
 ================================ */
 
 router.get("/get", getAllUsers);
-
 router.get("/get/:userId", getUserById);
-
 router.delete("/delete/:userId", deleteUserById);
-
 
 /* ===============================
    EXPORT ROUTER

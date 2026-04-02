@@ -35,12 +35,10 @@ import { createBrandValidator, updateBrandValidator } from "./ brand.validator.j
  */
 export const createBrand = async (req, res) => {
   try {
-
     /* ---------- VALIDATION ---------- */
     const { value, error } = createBrandValidator.validate(req.body, {
       abortEarly: false
     });
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -49,9 +47,7 @@ export const createBrand = async (req, res) => {
         details: error.details.map((err) => err.message)
       });
     }
-
     const { name, categories, permission } = value;
-
     const logoFile = req.files?.logoUrl?.[0];
     const files = req.files?.file || [];
 
@@ -62,12 +58,10 @@ export const createBrand = async (req, res) => {
         errorCode: "VALIDATION_ERROR"
       });
     }
-
     /* ---------- FETCH EMPLOYEE ---------- */
     const employee = await Employee.findOne({
       email: req.user.email
     });
-
     if (!employee) {
       return sendError(res, {
         message: "Employee not found",
@@ -75,7 +69,6 @@ export const createBrand = async (req, res) => {
         errorCode: "EMPLOYEE_NOT_FOUND"
       });
     }
-
     const result = await createBrandService({
       name,
       categories,
@@ -84,20 +77,15 @@ export const createBrand = async (req, res) => {
       employee,
       permission
     });
-
     return sendSuccess(
       res,
       result,
       201,
       "Brand created successfully"
     );
-
-  } catch (error) {
-
+    }catch (error) {
     console.error("Create Brand Error:", error);
-
     return handleError(res, error);
-
   }
 };
 

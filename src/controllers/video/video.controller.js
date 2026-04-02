@@ -106,7 +106,6 @@ export const addVideo = async (req, res) => {
   try {
     /* ---------- VALIDATION ---------- */
     const { value, error } = validateAddVideoBody(req.body);
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -115,7 +114,6 @@ export const addVideo = async (req, res) => {
         details: error.details.map((err) => err.message)
       });
     }
-
     /* ---------- SERVICE ---------- */
     const result = await addVideoService({
       ...value,

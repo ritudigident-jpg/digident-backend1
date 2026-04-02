@@ -265,7 +265,6 @@ export const updateBanner = async (req, res) => {
       200,
       "Banner updated successfully"
     );
-
   } catch (error) {
     console.error("Update Banner Error:", error);
     return handleError(res, error);
@@ -300,7 +299,7 @@ export const updateBannerDisplayOrder = async (req, res) => {
   try {
     const { bannerId } = req.params;
     const { displayOrder, permission } = req.body;
-    if (!bannerId) {
+    if (!bannerId){
       return sendError(res, {
         message: "BannerId is required",
         statusCode: 400,
@@ -434,23 +433,19 @@ export const deleteBanner = async (req, res) => {
  * 200 { success: true, message: "Banners fetched successfully", data: { banners, pagination } }
  */
 export const getBannersByIsActive = async (req, res) => {
-  try {
-
+  try{
     const { isActive } = req.query;
-
-    if (isActive === undefined) {
+    if (isActive === undefined){
       return sendError(res, {
         message: "isActive query param is required (true | false)",
         statusCode: 400,
         errorCode: "VALIDATION_ERROR"
       });
     }
-
     /* ---------- CONVERT TO BOOLEAN ---------- */
     const isActiveBool =
       isActive === "true" ? true :
       isActive === "false" ? false : null;
-
     if (isActiveBool === null) {
       return sendError(res, {
         message: "isActive must be true or false",
@@ -458,28 +453,21 @@ export const getBannersByIsActive = async (req, res) => {
         errorCode: "VALIDATION_ERROR"
       });
     }
-
     const { page, limit, skip } = getPagination(req.query);
-
     const result = await getBannersByIsActiveService({
       isActive: isActiveBool,
       page,
       limit,
       skip
     });
-
     return sendSuccess(
       res,
       result,
       200,
       "Banners fetched successfully"
     );
-
-  } catch (error) {
-
+  }catch (error) {
     console.error("Get Banners By Status Error:", error);
-
     return handleError(res, error);
-
   }
 };

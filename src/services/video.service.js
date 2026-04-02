@@ -1,6 +1,6 @@
 import YTVideo from "../models/manage/video.model.js";
 import Employee from "../models/manage/employee.model.js";
-import PermissionAudit from "../models/manage/permission.model.js";
+import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
 import { v6 as uuidv6 } from "uuid";
 
 export const getYTDocService = async ({
@@ -51,6 +51,7 @@ export const addVideoService = async ({
   permission,
   userEmail
 }) => {
+  console.log("title:", title, "link:", link, "permission:", permission, "userEmail:", userEmail);
   try {
     /* ---------- VALIDATION ---------- */
     if (!title || !link) {
@@ -60,54 +61,46 @@ export const addVideoService = async ({
         errorCode: "VALIDATION_ERROR"
       };
     }
-
     /* ---------- FETCH EMPLOYEE ---------- */
     const employee = await Employee.findOne({ email: userEmail });
-
-    if (!employee) {
+    if(!employee){
       throw {
         message: "Employee not found",
         statusCode: 404,
         errorCode: "EMPLOYEE_NOT_FOUND"
       };
     }
-
     /* ---------- GET OR CREATE DOC ---------- */
     let doc = await YTVideo.findOne();
-
     if (!doc) {
       doc = await YTVideo.create({ videos: [] });
     }
-
     /* ---------- ADD VIDEO ---------- */
     const newVideo = {
       ytVideoId: uuidv6(),
       title,
       link
     };
-
     doc.videos.push(newVideo);
     await doc.save();
-
     /* ---------- AUDIT LOG ---------- */
-    await PermissionAudit.create({
-      permissionAuditId: uuidv6(),
-      actionBy: employee._id,
-      actionByEmail: employee.email,
-      actionFor: doc._id,
-      action: `Added YouTube video: ${title}`,
-      permission: permission || "create_video",
-      actionType: "Create"
-    });
-
+    console.log("actionBy:", employee._id, "actionByEmail:", employee.email, "actionFor:", doc._id, "action:", `Added YouTube video: ${title}`, "permission:", permission, "actionType: Create");
+    // await PermissionAudit.create({
+    //   permissionAuditId: uuidv6(),
+    //   actionBy: employee._id,
+    //   actionByEmail: employee.email,
+    //   // actionFor: doc._id,
+    //   actionFor:"video_document",
+    //   action: `Added YouTube video: ${title}`,
+    //   permission: permission,
+    //   actionType: "Create"
+    // });
     /* ---------- RESPONSE ---------- */
     return {
       video: newVideo
     };
-
   } catch (error) {
     console.error("Add Video Service Error:", error);
-
     throw {
       message: error.message || "Failed to add video",
       statusCode: error.statusCode || 500,

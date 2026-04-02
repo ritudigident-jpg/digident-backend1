@@ -41,7 +41,7 @@ export const createCategoryService = async ({
       actionByEmail: employee.email,
       actionFor: category._id,
       action: category.name,
-      permission: permission || "create_category",
+      permission: permission,
       actionType: "Create",
     });
 

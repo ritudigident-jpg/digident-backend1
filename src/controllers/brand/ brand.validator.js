@@ -9,17 +9,13 @@ export const createBrandValidator = Joi.object({
     .messages({
       "string.empty": "Brand name is required"
     }),
-
   categories: Joi.alternatives()
     .try(
       Joi.string(),
       Joi.array().items(Joi.string())
-    )
-    .optional(),
-
+    ).optional(),
   permission: Joi.string().optional()
 });
-
 
 export const updateBrandValidator = Joi.object({
   name: Joi.string()

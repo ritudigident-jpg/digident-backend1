@@ -34,8 +34,8 @@ export const checkPermission = () => {
          VALIDATE TOKEN USER
       ========================= */
       const userEmail = req.user?.email;
-      const requiredPermission = req.body.permission; // Assuming permission is sent in request body
-
+      const requiredPermission = req.body.permission;
+     // Assuming permission is sent in request body
       if (!userEmail) {
         return sendError(res, {
           message: "Unauthorized",

@@ -16,7 +16,7 @@ import couponRoutes from "./src/routes/manage/coupon.routes.js";
 import bannerRoutes from "./src/routes/manage/banner.routes.js";
 import cartRoutes from "./src/routes/ecommarace/cart.routes.js";
 import ipAnalyticsRoutes from "./src/routes/manage/ipanalytic.routes.js";
-import viedoRoutes from "./src/routes/manage/video.routes.js";
+import videoRoutes from "./src/routes/manage/video.routes.js";
 import reviewRoutes from "./src/routes/ecommarace/review.routes.js"
 import productRoutes from "./src/routes/manage/product.routes.js"
 import zohoRoutes from "./src/routes/zoho/zoho.routes.js"
@@ -141,7 +141,7 @@ app.use("/api/v1/coupons", couponRoutes);
 app.use("/api/v1/banner", bannerRoutes);
 app.use("/api/v1/cart", cartRoutes);
 app.use("/api/v1/ipAnalytics", ipAnalyticsRoutes);
-app.use("/api/v1/viedo", viedoRoutes);
+app.use("/api/v1/video", videoRoutes);
 app.use("/api/v1/rating", reviewRoutes);
 app.use("/api/v1/product", productRoutes);
 app.use("/api/v1/stock-audit",stockAudit)
