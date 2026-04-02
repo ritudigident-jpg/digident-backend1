@@ -6,36 +6,35 @@ import { uploadToS3, deleteFromS3 } from "../services/awsS3.service.js";
 
 export const addProductService = async ({ body, files, user }) => {
   const uploadedFiles = [];
-
   try {
     /* ---------------- VALIDATION ---------------- */
     if (!user?.email) {
       throw new Error("Unauthorized user");
     }
-
     /* ---------------- FETCH EMPLOYEE ---------------- */
     const employee = await Employee.findOne({ email: user.email });
     if (!employee) {
       throw new Error("Employee not found");
     }
-
     /* ---------------- INIT PRODUCT ---------------- */
     body.productId = uuidv6();
-
     /* =====================================================
        🖼 PRODUCT IMAGES
        ===================================================== */
 
-    if (files?.productImages?.length) {
-      body.images = await uploadToS3(
-        files.productImages,
-        "products",
-        uploadedFiles
-      );
-    } else {
-      body.images = [];
-    }
+       
+if (files?.productImages?.length) {
+  const uploadedImages = [];
 
+  for (const file of files.productImages) {
+    const uploaded = await uploadToS3(file, "products");
+    uploadedImages.push(uploaded.url);
+  }
+
+  body.images = uploadedImages;
+} else {
+  body.images = [];
+}
     /* =====================================================
        📝 DESCRIPTION
        ===================================================== */
