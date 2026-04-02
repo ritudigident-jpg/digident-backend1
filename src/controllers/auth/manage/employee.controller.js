@@ -1,11 +1,9 @@
 import { changePasswordValidation, createEmployeeValidator, loginEmployeeValidator, } from "./employee.validator.js";
-import { changeEmployeePasswordService, createEmployeeService, getEmployeeService, loginEmployeeService, refreshEmployeeAccessTokenService, updateEmployeeRoleService } from "../../../services/auth/employee.service.js";
+import { changeEmployeePasswordService, createEmployeeService, forgotEmployeePasswordService, getEmployeeService, loginEmployeeService, refreshEmployeeAccessTokenService, resetEmployeePasswordService, updateEmployeeRoleService, verifyEmailService } from "../../../services/auth/employee.service.js";
 import { sendSuccess } from "../../../helpers/response.helper.js";
 import { handleError, sendError } from "../../../helpers/error.helper.js";
 import DeletedEmployee from "../../../models/manage/deleteemployee.model.js";
-import bcrypt from "bcryptjs";
-import Employee from "../../../models/manage/employee.model.js";
-import { v6 as uuidv6 } from "uuid";
+
 /**
  * @function createEmployeeService
  *

@@ -257,14 +257,11 @@ export const updateBannerService = async ({
     });
 
     return banner;
-
   } catch (error) {
-
     /* ---------- ROLLBACK ---------- */
     if (newImageUpload?.url) {
       await deleteFromS3(newImageUpload.url);
     }
-
     throw error;
   }
 };

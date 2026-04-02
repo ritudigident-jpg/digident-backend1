@@ -1,5 +1,4 @@
 import { v6 as uuidv6 } from "uuid";
-import user from "../models/ecommarace/user.model.js";
 export const addAddressService = async (user, data) => {
   const {
     label,
@@ -26,7 +25,7 @@ export const addAddressService = async (user, data) => {
       a.street === street &&
       a.area === area
   );
-  if (duplicate) {
+  if(duplicate){
     throw new Error("ADDRESS_ALREADY_EXISTS");
   }
   if (isDefault) {
@@ -122,7 +121,6 @@ export const clearAllAddressesService = async (user) => {
 };
 
 export const getDefaultAddressService = async (user) => {
-
   if (!user) {
     const error = new Error("User not found");
     error.statusCode = 404;

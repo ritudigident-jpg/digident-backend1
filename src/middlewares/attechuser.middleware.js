@@ -44,7 +44,7 @@ export const attachUser = async (req, res, next) => {
       email,
       isActive: true,
       deletedAt: null,
-    }).lean();
+    });
 
     if (!user) {
       throw new Error("USER_NOT_FOUND");

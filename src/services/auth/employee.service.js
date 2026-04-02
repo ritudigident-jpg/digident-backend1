@@ -5,6 +5,9 @@ import { sendZohoMail } from "../ZohoEmail/zohoMail.service.js";
 import { employeeWelcomeEmail } from "../../config/templates/employeeWelcomeEmail.js";
 import bcrypt from "bcrypt";
 import { generateTokens } from "../../helpers/token.helper.js";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import { resetPasswordTemplate } from "../../config/templates/resetPasswordTemplate.js";
 
 export const createEmployeeService = async (data, adminEmail) => {
   const {
@@ -283,7 +286,7 @@ export const refreshEmployeeAccessTokenService = async (refreshToken) => {
     throw new Error("INVALID_OR_EXPIRED_REFRESH_TOKEN");
   }
   const employee = await Employee.findOne({
-    employeeId: decoded.employeeId,
+    email: decoded.email,
     isDeleted: false
   });
   if (!employee) {
