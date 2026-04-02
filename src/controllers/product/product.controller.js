@@ -474,14 +474,14 @@ export const getProductsByStatus = async (req, res) => {
     const allowedSortFields = ["name", "price", "createdAt"];
     const safeSortBy = allowedSortFields.includes(sortBy)
       ? sortBy
-      : "createdAt";
+      :"createdAt";
 
     const safeSortOrder = sortOrder === "asc" ? "asc" : "desc";
 
     /* ---------------- SERVICE CALL ---------------- */
     const result = await getProductsByStatusService({
       pagination,
-      filters: {
+      filters:{
         search,
         category,
         brand,

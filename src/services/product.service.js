@@ -27,7 +27,7 @@ export const addProductService = async ({ body, files, user }) => {
        ===================================================== */
 
     if (files?.productImages?.length) {
-      body.images = await uploadFiles(
+      body.images = await uploadToS3(
         files.productImages,
         "products",
         uploadedFiles
@@ -366,7 +366,6 @@ export const getProductsByStatusService = async (query) => {
     const sortOptions = {
       [safeSortBy]: sortOrder === "asc" ? 1 : -1,
     };
-
     /* ---------------- QUERY ---------------- */
     const [products, totalProducts] = await Promise.all([
       Product.find(filter)
