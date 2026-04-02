@@ -14,7 +14,7 @@ export const addAddressService = async (user, data) => {
     country,
     isDefault = false
   } = data;
-  if (!user.address) {
+  if(!user.address){
     user.address = []; // ✅ prevent crash
   }
   const allowedLabels = ["Home", "Work", "Other"];

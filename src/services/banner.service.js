@@ -208,8 +208,8 @@ export const updateBannerService = async ({
     }
 
     /* ---------- DISPLAY ORDER CHECK ---------- */
-    const shouldBeActive =
-      typeof isActive === "boolean" ? isActive : banner.isActive;
+    const shouldBeActive = isActive ? isActive : banner.isActive;
+ 
 
     if (displayOrder && shouldBeActive) {
       const conflict = await Banner.findOne({
@@ -241,9 +241,9 @@ export const updateBannerService = async ({
     if (filterBy) banner.filterBy = filterBy;
     if (filterId) banner.filterId = filterId;
     if (displayOrder) banner.displayOrder = displayOrder;
-    if (typeof isActive === "boolean") banner.isActive = isActive;
+    if (isActive) banner.isActive = isActive;
 
-    await banner.save();
+    await banner.save();  
 
     /* ---------- AUDIT ---------- */
     await PermissionAudit.create({

@@ -39,26 +39,25 @@ import { validateAddVideoBody, validateUpdateVideo } from "./video.validator.js"
  *   }
  * }
  */
+
 export const getAllVideos = async (req, res) => {
   try {
-    /* ---------- PAGINATION (OPTIONAL) ---------- */
-    const { page, limit, skip } = getPagination(req.query);
+    const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
+    const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
+    const skip = (page - 1) * limit;
 
-    /* ---------- SERVICE ---------- */
     const result = await getYTDocService({
       page,
       limit,
       skip
     });
 
-    /* ---------- RESPONSE ---------- */
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "YouTube videos fetched successfully"
-    );
-
+    return res.status(200).json({
+      success: true,
+      message: "YouTube videos fetched successfully",
+      statusCode: 200,
+      data: result
+    });
   } catch (error) {
     return handleError(res, error);
   }

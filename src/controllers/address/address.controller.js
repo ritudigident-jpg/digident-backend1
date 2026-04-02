@@ -44,12 +44,12 @@ import { addAddressValidator } from "./address.validator.js";
  * 500 - INTERNAL_SERVER_ERROR
  */
 export const addAddress = async (req, res) => {
-  try {
+  try{
     const user = req.currentUser;
     const { value, error } = addAddressValidator.validate(req.body, {
       abortEarly: false
     });
-    if (error) {
+    if(error){
       return sendError(res, {
         message: "Validation failed",
         statusCode: 400,
