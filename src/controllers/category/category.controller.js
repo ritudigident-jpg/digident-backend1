@@ -31,8 +31,7 @@ export const createCategory = async (req, res) => {
     const { value, error } = createCategoryValidator.validate(req.body, {
       abortEarly: false
     });
-
-    if (error) {
+    if (error){
       return sendError(res, {
         message: "Validation failed",
         statusCode: 400,
@@ -40,7 +39,6 @@ export const createCategory = async (req, res) => {
         details: error.details.map(e => e.message)
       });
     }
-
     const { name, permission } = value;
     if (!req.file) {
       return sendError(res, {

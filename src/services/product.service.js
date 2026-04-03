@@ -15,17 +15,13 @@ const uploadFiles = async (files = [], folder, uploadedFiles = []) => {
       if (!file) {
         throw new Error("Invalid file sent from frontend");
       }
-
       const uploaded = await uploadToS3(file, folder);
-
       if (!uploaded?.url) {
         throw new Error("File upload failed");
       }
-
       if (uploaded?.key) {
         uploadedFiles.push(uploaded.key);
       }
-
       return uploaded.url;
     })
   );
@@ -53,7 +49,6 @@ export const addProductService = async ({ body, files, user }) => {
     if (!user?.email) {
       throw new Error("Unauthorized user");
     }
-
     /* ---------- FETCH EMPLOYEE ---------- */
     const employee = await Employee.findOne({
       email: user.email,
@@ -91,7 +86,6 @@ export const addProductService = async ({ body, files, user }) => {
       if (!groupedDesc[idx]) {
         groupedDesc[idx] = [];
       }
-
       groupedDesc[idx].push(file);
     });
 console.log("Grouped description files:----", groupedDesc); 

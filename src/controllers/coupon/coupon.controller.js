@@ -1,4 +1,4 @@
-import { couponValidator } from "./coupon.validator.js";
+import { couponValidator, createCouponValidation } from "./coupon.validator.js";
 import { handleError, sendError } from "../../helpers/error.helper.js";
 import { createCouponService, deleteCouponService, filterCouponsService, getSingleCouponService, updateCouponService } from "../../services/coupon.service.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -29,7 +29,7 @@ import { getPagination } from "../../helpers/pagination.helper.js";
 export const createCoupon = async (req, res) => {
   try {
     /* ---------- VALIDATION ---------- */
-    const { value, error } = couponValidator.validate(req.body, {
+    const { value, error } = createCouponValidation.validate(req.body, {
       abortEarly: false
     });
     if (error) {

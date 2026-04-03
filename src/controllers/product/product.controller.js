@@ -14,150 +14,6 @@ import Product from "../../models/manage/product.model.js";
 import { PermissionAudit } from "../../models/manage/permissionaudit.model.js";
 import { deleteFromS3, uploadToS3 } from "../../services/awsS3.service.js";
 import { v6 as uuidv6 } from "uuid";
-async function uploadFiles(files = [], folder, uploadedFiles) {
-  return Promise.all(
-    files.map(async (file) => {
-      if (!file || !file.buffer) {
-        throw new Error("Invalid file sent from frontend");
-      }
-      const uploaded = await uploadToS3(file, folder);
-      console.log("Uploaded file info:----", uploaded.url);
-      uploadedFiles.push(uploaded.key);
-      return uploaded.url;
-    })
-  );
-}
-
-// ADD Product
-export const addProduct = async (req, res) => {
-  const { permission } = req.body;
-  const uploadedFiles = [];   //TRACK UPLOADED FILES
-  try {
-    const body = req.body;
-    const files = req.files;
-    console.log("Received body:", body);
-    console.log("Received files:", files);
-    const {value,error} = validateProductBody(body);
-    if(error){
-      return ApiResponse.error(res, error.details[0].message, 400);
-    }
-       /* ---------- FETCH EMPLOYEE ---------- */
-       const employee = await Employee.findOne({ email: req.user.email });
-       if (!employee) {
-         return ApiResponse.error(res, "Employee not found", 404);
-       }
-    body.productId = uuidv6();
-    /* ---------- Product Images ---------- */
-    if(files.productImages?.length){
-      body.images = await uploadFiles(files.productImages,"Dummyproducts",uploadedFiles);
-    }
-    /* ---------- Description ---------- */
-    const descFiles = files.descriptionImages || [];
-// Description
-const descMap = Array.isArray(req.body.descriptionImageMap)
-  ? req.body.descriptionImageMap
-  : [];
-
-const groupedDesc = {};
-
-descFiles.forEach((file, i) => {
-  const idx = Number(descMap[i]);
-  if (Number.isNaN(idx)) return;
-  if (!groupedDesc[idx]) groupedDesc[idx] = [];
-  groupedDesc[idx].push(file);
-});
-
-body.description = await Promise.all(
-  body.description.map(async (desc, index) => {
-    const files = groupedDesc[index] || [];
-    const urls = files.length
-      ? await uploadFiles(files, "Dummyproducts", uploadedFiles)
-      : [];
-
-    return {
-      paragraphId: uuidv6(),
-      text: desc.text,
-      image: urls
-    };
-  })
-);
-
-
-    /* ---------- Specification ---------- */
-    if (Array.isArray(body.specification)) {
-      body.specification = body.specification.map(spec => ({
-        ...spec,
-        specId: uuidv6(),
-      }));
-    }
-
-    /* ---------- Variants ---------- */
-    const varFiles = files.variantImages || [];
-   // Variants
-const varMap = Array.isArray(req.body.variantImageMap)
-? req.body.variantImageMap
-: [];
-    const groupedVar = {};
-    varFiles.forEach((file, i) => {
-      const idx = Number(varMap[i]);
-      if (Number.isNaN(idx)) return;  
-      if (!groupedVar[idx]) groupedVar[idx] = [];
-      groupedVar[idx].push(file);
-    });
-    
-    body.variants = await Promise.all(
-      body.variants.map(async (variant, index) => {
-        const files = groupedVar[index] || [];
-        const urls = files.length
-          ? await uploadFiles(files, "Dummyproducts", uploadedFiles)
-          : [];
-    
-        return {
-          ...variant,
-          variantId: uuidv6(),
-          variantImages: urls,
-          attributes: Array.isArray(variant.attributes)
-            ? variant.attributes.map(a => ({ ...a, attrId: uuidv6() }))
-            : [],
-            variantStock:
-            body.stockType === "PRODUCT"
-              ? undefined
-              : variant.variantStock
-        };
-      })
-    );
-    
-    /* ---------- Stock Validation ---------- */
-    if (
-      body.stockType === "VARIANT" &&
-      body.variants.some(v => v.variantStock == null)
-    ) {
-      throw new Error(
-        "Each variant must have its own stock when stockType is VARIANT"
-      );
-    }
-    /* ---------- Save Product ---------- */
-    const product = await Product.create(body);
-
-      await PermissionAudit.create({
-                     permissionAuditId: uuidv6(),
-                     actionBy: employee._id,
-                     actionByEmail: employee.email,
-                     actionFor: product._id,
-                     action: product.name,
-                     permission: permission || "create_product",
-                     actionType: "Create",
-                   });
-    return ApiResponse.success(res, "Product added successfully", product, 201);
-  } catch (err) {
-    console.error("Add Product Error:", err);
-    /* ROLLBACK: DELETE UPLOADED IMAGES */
-    // await Promise.all(
-    //   uploadedFiles.map(key => deleteFromS3(key))
-    // );
-    return ApiResponse.error(res, err.message, 500);
-  }
-};
 
 /**
  * @function addProduct
@@ -286,58 +142,58 @@ const varMap = Array.isArray(req.body.variantImageMap)
  * - Images are uploaded externally and stored as URLs
  * - File upload uses multipart/form-data
  */
-// export const addProduct = async (req, res) => {
-//   try {
-//     /* ---------- VALIDATE BODY ---------- */
-//     const { value, error } = validateProductBody(req.body);
+export const addProduct = async (req, res) => {
+  try {
+    /* ---------- VALIDATE BODY ---------- */
+    const { value, error } = validateProductBody(req.body);
 
-//     if (error) {
-//       return sendError(res, {
-//         message: "Validation failed",
-//         statusCode: 400,
-//         errorCode: "VALIDATION_ERROR",
-//         details: error.details.map((err) => err.message),
-//       });
-//     }
+    if (error) {
+      return sendError(res, {
+        message: "Validation failed",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        details: error.details.map((err) => err.message),
+      });
+    }
 
-//     /* ---------- AUTH CHECK ---------- */
-//     if (!req.user) {
-//       return sendError(res, {
-//         message: "Unauthorized",
-//         statusCode: 401,
-//         errorCode: "UNAUTHORIZED",
-//       });
-//     }
+    /* ---------- AUTH CHECK ---------- */
+    if (!req.user) {
+      return sendError(res, {
+        message: "Unauthorized",
+        statusCode: 401,
+        errorCode: "UNAUTHORIZED",
+      });
+    }
 
-//     /* ---------- VALIDATE FILES ---------- */
-//     try {
-//       validateProductFiles(value, req.files);
-//     } catch (fileError) {
-//       return sendError(res, {
-//         message: fileError.message || "Invalid files",
-//         statusCode: 400,
-//         errorCode: "FILE_VALIDATION_ERROR",
-//       });
-//     }
+    /* ---------- VALIDATE FILES ---------- */
+    try {
+      validateProductFiles(value, req.files);
+    } catch (fileError) {
+      return sendError(res, {
+        message: fileError.message || "Invalid files",
+        statusCode: 400,
+        errorCode: "FILE_VALIDATION_ERROR",
+      });
+    }
 
-//     /* ---------- SERVICE ---------- */
-//     const product = await addProductService({
-//       body: value,
-//       files: req.files,
-//       user: req.user,
-//     });
+    /* ---------- SERVICE ---------- */
+    const product = await addProductService({
+      body: value,
+      files: req.files,
+      user: req.user,
+    });
 
-//     /* ---------- SUCCESS ---------- */
-//     return sendSuccess(
-//       res,
-//       { productId: product.productId },
-//       201,
-//       "Product added successfully"
-//     );
-//   } catch (error) {
-//     return handleError(res, error);
-//   }
-// };
+    /* ---------- SUCCESS ---------- */
+    return sendSuccess(
+      res,
+      { productId: product.productId },
+      201,
+      "Product added successfully"
+    );
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
 
 /**
  * @function updateProduct

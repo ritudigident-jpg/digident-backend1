@@ -6,16 +6,12 @@ import Joi from "joi";
 const buyXGetYSchema = Joi.object({
   buyQuantity: Joi.number().integer().min(1).required(),
   getQuantity: Joi.number().integer().min(1).required(),
-
   buyProducts: Joi.array().items(Joi.string()).optional(),
   getProducts: Joi.array().items(Joi.string()).optional(),
-
   buyBrand: Joi.string().optional(),
   getBrand: Joi.string().optional(),
-
   buyCategory: Joi.string().optional(),
   getCategory: Joi.string().optional(),
-
   getDiscountPercent: Joi.number().min(1).max(100).optional(),
 });
 
