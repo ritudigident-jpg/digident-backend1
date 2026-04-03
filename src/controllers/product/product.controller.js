@@ -9,12 +9,6 @@ import {
   validateUpdateProductBody,
   validateUpdateProductFiles,
 } from "./product.validator.js";
-import Employee from "../../models/manage/employee.model.js";
-import Product from "../../models/manage/product.model.js";
-import { PermissionAudit } from "../../models/manage/permissionaudit.model.js";
-import { deleteFromS3, uploadToS3 } from "../../services/awsS3.service.js";
-import { v6 as uuidv6 } from "uuid";
-
 /**
  * @function addProduct
  *
@@ -146,7 +140,6 @@ export const addProduct = async (req, res) => {
   try {
     /* ---------- VALIDATE BODY ---------- */
     const { value, error } = validateProductBody(req.body);
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -155,7 +148,6 @@ export const addProduct = async (req, res) => {
         details: error.details.map((err) => err.message),
       });
     }
-
     /* ---------- AUTH CHECK ---------- */
     if (!req.user) {
       return sendError(res, {
@@ -164,7 +156,6 @@ export const addProduct = async (req, res) => {
         errorCode: "UNAUTHORIZED",
       });
     }
-
     /* ---------- VALIDATE FILES ---------- */
     try {
       validateProductFiles(value, req.files);
@@ -175,14 +166,12 @@ export const addProduct = async (req, res) => {
         errorCode: "FILE_VALIDATION_ERROR",
       });
     }
-
     /* ---------- SERVICE ---------- */
     const product = await addProductService({
       body: value,
       files: req.files,
       user: req.user,
     });
-
     /* ---------- SUCCESS ---------- */
     return sendSuccess(
       res,

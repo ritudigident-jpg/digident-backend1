@@ -43,7 +43,6 @@ const uploadFiles = async (files = [], folder, uploadedFiles = []) => {
  */
 export const addProductService = async ({ body, files, user }) => {
   const uploadedFiles = [];
-  console.log("Service called with body:----", body);
   try {
     /* ---------- VALIDATE USER ---------- */
     if (!user?.email) {
@@ -109,7 +108,6 @@ console.log("Grouped description files:----", groupedDesc);
       ...spec,
       specId: uuidv6(),
     }));
-console.log("After specification processing:----");
     /* ---------- VARIANT IMAGES ---------- */
     const varFiles = files?.variantImages || [];
     const varMap = Array.isArray(body.variantImageMap)
@@ -135,7 +133,6 @@ console.log("After specification processing:----");
         const urls = variantFiles.length
           ? await uploadFiles(variantFiles, "products", uploadedFiles)
           : [];
-       console.log(`Variant ${index} files uploaded:----`, urls);
         return {
           ...variant,
           variantId: uuidv6(),
@@ -153,7 +150,6 @@ console.log("After specification processing:----");
         };
       })
     );
-console.log("After variants processing:----", body.variants);
     /* ---------- STOCK VALIDATION ---------- */
     if (
       body.stockType === "VARIANT" &&
@@ -180,7 +176,7 @@ console.log("After variants processing:----", body.variants);
     return product;
   } catch (error) {
     /* ---------- ROLLBACK UPLOADED FILES ---------- */
-    // await Promise.all(uploadedFiles.map((key) => deleteFromS3(key)));
+    await Promise.all(uploadedFiles.map((key) => deleteFromS3(key)));
     throw new Error(error.message || "Failed to add product");
   }
 };
