@@ -2,17 +2,59 @@ import { v6 as uuidv6 } from "uuid";
 import Product from "../models/manage/product.model.js";
 import Employee from "../models/manage/employee.model.js";
 import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
-import { uploadToS3, deleteFromS3 } from "../services/awsS3.service.js";
+import { uploadToS3, deleteFromS3 } from "./awsS3.service.js";
+/**
+ * @function uploadFiles
+ *
+ * @description
+ * Upload multiple files to S3 and track uploaded keys for rollback.
+ */
+const uploadFiles = async (files = [], folder, uploadedFiles = []) => {
+  return Promise.all(
+    files.map(async (file) => {
+      if (!file) {
+        throw new Error("Invalid file sent from frontend");
+      }
 
+      const uploaded = await uploadToS3(file, folder);
+
+      if (!uploaded?.url) {
+        throw new Error("File upload failed");
+      }
+
+      if (uploaded?.key) {
+        uploadedFiles.push(uploaded.key);
+      }
+
+      return uploaded.url;
+    })
+  );
+};
+
+/**
+ * @function addProductService
+ *
+ * @description
+ * Service to create a product with:
+ * - product images
+ * - description images
+ * - variant images
+ * - specification ids
+ * - variant ids
+ * - attribute ids
+ * - stock validation
+ * - permission audit
+ */
 export const addProductService = async ({ body, files, user }) => {
   const uploadedFiles = [];
+
   try {
-    /* ---------------- VALIDATION ---------------- */
+    /* ---------- VALIDATE USER ---------- */
     if (!user?.email) {
       throw new Error("Unauthorized user");
     }
 
-    /* ---------------- FETCH EMPLOYEE ---------------- */
+    /* ---------- FETCH EMPLOYEE ---------- */
     const employee = await Employee.findOne({
       email: user.email,
       isDeleted: false,
@@ -22,170 +64,143 @@ export const addProductService = async ({ body, files, user }) => {
       throw new Error("Employee not found");
     }
 
-    /* ---------------- INIT PRODUCT ---------------- */
+    /* ---------- INIT PRODUCT ---------- */
     body.productId = uuidv6();
 
-    /* =====================================================
-       🖼 PRODUCT IMAGES
-    ===================================================== */
+    /* ---------- NORMALIZE ARRAYS ---------- */
+    body.description = Array.isArray(body.description) ? body.description : [];
+    body.specification = Array.isArray(body.specification) ? body.specification : [];
+    body.variants = Array.isArray(body.variants) ? body.variants : [];
+
+    /* ---------- PRODUCT IMAGES ---------- */
     if (files?.productImages?.length) {
-      const uploadedImages = [];
-
-      for (const file of files.productImages) {
-        const uploaded = await uploadToS3(file, "products");
-
-        uploadedImages.push(uploaded.url);
-
-        if (uploaded.key) {
-          uploadedFiles.push(uploaded.key);
-        }
-      }
-
-      body.images = uploadedImages;
+      body.images = await uploadFiles(files.productImages, "products", uploadedFiles);
     } else {
       body.images = [];
     }
 
-    /* =====================================================
-       📝 DESCRIPTION IMAGES MAP
-       Expected:
-       body.description = [{ text: "...", image: [] }]
-       body.descriptionImageMap = [{ paragraphIndex: 0, imageIndexes: [0,1] }]
-    ===================================================== */
-    const uploadedDescriptionImages = [];
+    /* ---------- DESCRIPTION IMAGES ---------- */
+    const descFiles = files?.descriptionImages || [];
+    const descMap = Array.isArray(body.descriptionImageMap)
+      ? body.descriptionImageMap
+      : [];
 
-    if (files?.descriptionImages?.length) {
-      for (const file of files.descriptionImages) {
-        const uploaded = await uploadToS3(file, "products/descriptions");
-        uploadedDescriptionImages.push(uploaded.url);
+    const groupedDesc = {};
 
-        if (uploaded.key) {
-          uploadedFiles.push(uploaded.key);
-        }
+    descFiles.forEach((file, i) => {
+      const idx = Number(descMap[i]);
+      if (Number.isNaN(idx)) return;
+
+      if (!groupedDesc[idx]) {
+        groupedDesc[idx] = [];
       }
-    }
 
-    if (Array.isArray(body.description)) {
-      body.description = body.description.map((desc, index) => {
-        let mappedImages = [];
+      groupedDesc[idx].push(file);
+    });
 
-        if (Array.isArray(body.descriptionImageMap)) {
-          const mapping = body.descriptionImageMap.find(
-            (item) => item.paragraphIndex === index
-          );
-
-          if (mapping && Array.isArray(mapping.imageIndexes)) {
-            mappedImages = mapping.imageIndexes
-              .map((imgIndex) => uploadedDescriptionImages[imgIndex])
-              .filter(Boolean);
-          }
-        }
+    body.description = await Promise.all(
+      body.description.map(async (desc, index) => {
+        const paragraphFiles = groupedDesc[index] || [];
+        const urls = paragraphFiles.length
+          ? await uploadFiles(paragraphFiles, "products", uploadedFiles)
+          : [];
 
         return {
           paragraphId: uuidv6(),
-          text: desc.text || "",
-          image: mappedImages,
+          text: desc?.text || "",
+          image: urls,
         };
-      });
-    } else {
-      body.description = [];
-    }
+      })
+    );
 
-    /* =====================================================
-       📋 SPECIFICATIONS
-    ===================================================== */
-    if (Array.isArray(body.specification)) {
-      body.specification = body.specification.map((spec) => ({
-        ...spec,
-        specId: uuidv6(),
-      }));
-    } else {
-      body.specification = [];
-    }
+    /* ---------- SPECIFICATION ---------- */
+    body.specification = body.specification.map((spec) => ({
+      ...spec,
+      specId: uuidv6(),
+    }));
 
-    /* =====================================================
-       🎨 VARIANTS + VARIANT IMAGES MAP
-       Expected:
-       body.variants = [...]
-       body.variantImageMap = [{ variantIndex: 0, imageIndexes: [0,1] }]
-    ===================================================== */
-    const uploadedVariantImages = [];
+    /* ---------- VARIANT IMAGES ---------- */
+    const varFiles = files?.variantImages || [];
+    const varMap = Array.isArray(body.variantImageMap)
+      ? body.variantImageMap
+      : [];
 
-    if (files?.variantImages?.length) {
-      for (const file of files.variantImages) {
-        const uploaded = await uploadToS3(file, "products/variants");
-        uploadedVariantImages.push(uploaded.url);
+    const groupedVar = {};
 
-        if (uploaded.key) {
-          uploadedFiles.push(uploaded.key);
-        }
+    varFiles.forEach((file, i) => {
+      const idx = Number(varMap[i]);
+      if (Number.isNaN(idx)) return;
+
+      if (!groupedVar[idx]) {
+        groupedVar[idx] = [];
       }
-    }
 
-    if (Array.isArray(body.variants)) {
-      body.variants = body.variants.map((variant, index) => {
-        let mappedImages = [];
+      groupedVar[idx].push(file);
+    });
 
-        if (Array.isArray(body.variantImageMap)) {
-          const mapping = body.variantImageMap.find(
-            (item) => item.variantIndex === index
-          );
-
-          if (mapping && Array.isArray(mapping.imageIndexes)) {
-            mappedImages = mapping.imageIndexes
-              .map((imgIndex) => uploadedVariantImages[imgIndex])
-              .filter(Boolean);
-          }
-        }
+    body.variants = await Promise.all(
+      body.variants.map(async (variant, index) => {
+        const variantFiles = groupedVar[index] || [];
+        const urls = variantFiles.length
+          ? await uploadFiles(variantFiles, "products", uploadedFiles)
+          : [];
 
         return {
           ...variant,
           variantId: uuidv6(),
-          images: mappedImages,
+          variantImages: urls, // keep same as your old working code
           attributes: Array.isArray(variant.attributes)
-            ? variant.attributes.map((a) => ({
-                ...a,
+            ? variant.attributes.map((attr) => ({
+                ...attr,
                 attrId: uuidv6(),
               }))
             : [],
+          variantStock:
+            body.stockType === "PRODUCT"
+              ? undefined
+              : variant.variantStock,
         };
-      });
-    } else {
-      body.variants = [];
-    }
+      })
+    );
 
-    /* =====================================================
-       📦 STOCK VALIDATION
-    ===================================================== */
+    /* ---------- STOCK VALIDATION ---------- */
     if (
       body.stockType === "VARIANT" &&
-      body.variants.some((v) => v.variantStock == null)
+      body.variants.some((variant) => variant.variantStock == null)
     ) {
-      throw new Error("Each variant must have its own stock");
+      throw new Error(
+        "Each variant must have its own stock when stockType is VARIANT"
+      );
     }
 
-    /* ---------------- SAVE ---------------- */
+    /* ---------- CLEAN REQUEST-ONLY FIELDS ---------- */
+    const permission = body.permission;
+    delete body.permission;
+    delete body.descriptionImageMap;
+    delete body.variantImageMap;
+
+    /* ---------- SAVE PRODUCT ---------- */
     const product = await Product.create(body);
 
-    /* ---------------- AUDIT ---------------- */
+    /* ---------- AUDIT ---------- */
     await PermissionAudit.create({
       permissionAuditId: uuidv6(),
       actionBy: employee._id,
       actionByEmail: employee.email,
       actionFor: product._id,
       action: product.name,
-      permission: body.permission || "create_product",
+      permission: permission || "create_product",
       actionType: "Create",
     });
 
     return product;
   } catch (error) {
-    /* ---------------- ROLLBACK FILES ---------------- */
+    /* ---------- ROLLBACK UPLOADED FILES ---------- */
     await Promise.all(uploadedFiles.map((key) => deleteFromS3(key)));
-
-    throw new Error(error.message || "Failed to create product");
+    throw new Error(error.message || "Failed to add product");
   }
 };
+
 
 export const updateProductService = async ({
   productId,
