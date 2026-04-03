@@ -11,48 +11,89 @@ export const addProductService = async ({ body, files, user }) => {
     if (!user?.email) {
       throw new Error("Unauthorized user");
     }
+
     /* ---------------- FETCH EMPLOYEE ---------------- */
-    const employee = await Employee.findOne({ email: user.email });
+    const employee = await Employee.findOne({
+      email: user.email,
+      isDeleted: false,
+    });
+
     if (!employee) {
       throw new Error("Employee not found");
     }
+
     /* ---------------- INIT PRODUCT ---------------- */
     body.productId = uuidv6();
+
     /* =====================================================
        🖼 PRODUCT IMAGES
-       ===================================================== */
+    ===================================================== */
+    if (files?.productImages?.length) {
+      const uploadedImages = [];
 
-       
-if (files?.productImages?.length) {
-  const uploadedImages = [];
+      for (const file of files.productImages) {
+        const uploaded = await uploadToS3(file, "products");
 
-  for (const file of files.productImages) {
-    const uploaded = await uploadToS3(file, "products");
-    uploadedImages.push(uploaded.url);
-  }
+        uploadedImages.push(uploaded.url);
 
-  body.images = uploadedImages;
-} else {
-  body.images = [];
-}
+        if (uploaded.key) {
+          uploadedFiles.push(uploaded.key);
+        }
+      }
+
+      body.images = uploadedImages;
+    } else {
+      body.images = [];
+    }
+
     /* =====================================================
-       📝 DESCRIPTION
-       ===================================================== */
+       📝 DESCRIPTION IMAGES MAP
+       Expected:
+       body.description = [{ text: "...", image: [] }]
+       body.descriptionImageMap = [{ paragraphIndex: 0, imageIndexes: [0,1] }]
+    ===================================================== */
+    const uploadedDescriptionImages = [];
+
+    if (files?.descriptionImages?.length) {
+      for (const file of files.descriptionImages) {
+        const uploaded = await uploadToS3(file, "products/descriptions");
+        uploadedDescriptionImages.push(uploaded.url);
+
+        if (uploaded.key) {
+          uploadedFiles.push(uploaded.key);
+        }
+      }
+    }
 
     if (Array.isArray(body.description)) {
-      body.description = body.description.map((desc) => ({
-        paragraphId: uuidv6(),
-        text: desc.text,
-        image: Array.isArray(desc.image) ? desc.image : [],
-      }));
+      body.description = body.description.map((desc, index) => {
+        let mappedImages = [];
+
+        if (Array.isArray(body.descriptionImageMap)) {
+          const mapping = body.descriptionImageMap.find(
+            (item) => item.paragraphIndex === index
+          );
+
+          if (mapping && Array.isArray(mapping.imageIndexes)) {
+            mappedImages = mapping.imageIndexes
+              .map((imgIndex) => uploadedDescriptionImages[imgIndex])
+              .filter(Boolean);
+          }
+        }
+
+        return {
+          paragraphId: uuidv6(),
+          text: desc.text || "",
+          image: mappedImages,
+        };
+      });
     } else {
       body.description = [];
     }
 
     /* =====================================================
        📋 SPECIFICATIONS
-       ===================================================== */
-
+    ===================================================== */
     if (Array.isArray(body.specification)) {
       body.specification = body.specification.map((spec) => ({
         ...spec,
@@ -63,28 +104,59 @@ if (files?.productImages?.length) {
     }
 
     /* =====================================================
-       🎨 VARIANTS
-       ===================================================== */
+       🎨 VARIANTS + VARIANT IMAGES MAP
+       Expected:
+       body.variants = [...]
+       body.variantImageMap = [{ variantIndex: 0, imageIndexes: [0,1] }]
+    ===================================================== */
+    const uploadedVariantImages = [];
+
+    if (files?.variantImages?.length) {
+      for (const file of files.variantImages) {
+        const uploaded = await uploadToS3(file, "products/variants");
+        uploadedVariantImages.push(uploaded.url);
+
+        if (uploaded.key) {
+          uploadedFiles.push(uploaded.key);
+        }
+      }
+    }
 
     if (Array.isArray(body.variants)) {
-      body.variants = body.variants.map((variant) => ({
-        ...variant,
-        variantId: uuidv6(),
-        attributes: Array.isArray(variant.attributes)
-          ? variant.attributes.map((a) => ({
-              ...a,
-              attrId: uuidv6(),
-            }))
-          : [],
-      }));
+      body.variants = body.variants.map((variant, index) => {
+        let mappedImages = [];
+
+        if (Array.isArray(body.variantImageMap)) {
+          const mapping = body.variantImageMap.find(
+            (item) => item.variantIndex === index
+          );
+
+          if (mapping && Array.isArray(mapping.imageIndexes)) {
+            mappedImages = mapping.imageIndexes
+              .map((imgIndex) => uploadedVariantImages[imgIndex])
+              .filter(Boolean);
+          }
+        }
+
+        return {
+          ...variant,
+          variantId: uuidv6(),
+          images: mappedImages,
+          attributes: Array.isArray(variant.attributes)
+            ? variant.attributes.map((a) => ({
+                ...a,
+                attrId: uuidv6(),
+              }))
+            : [],
+        };
+      });
     } else {
       body.variants = [];
     }
 
     /* =====================================================
        📦 STOCK VALIDATION
-       ===================================================== */
-
+    ===================================================== */
     if (
       body.stockType === "VARIANT" &&
       body.variants.some((v) => v.variantStock == null)
@@ -107,7 +179,6 @@ if (files?.productImages?.length) {
     });
 
     return product;
-
   } catch (error) {
     /* ---------------- ROLLBACK FILES ---------------- */
     await Promise.all(uploadedFiles.map((key) => deleteFromS3(key)));

@@ -114,12 +114,7 @@ export const validateProductBody = (body) => {
     allowUnknown: true,
     context: { stockType: body.stockType },
   });
-
-  if (error) {
-    return { error: formatJoiError(error) };
-  }
-
-  return { value };
+  return { error, value };
 };
 
 /* =========================================================
