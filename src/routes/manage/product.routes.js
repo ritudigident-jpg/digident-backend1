@@ -9,9 +9,9 @@ const router = express.Router();
 router.post(
   "/add",
   upload.fields([
-    { name: "productImages", maxCount: 10 },
-    { name: "descriptionImages", maxCount: 10 },
-    { name: "variantImages", maxCount: 20 },
+    { name: "DummyproductImages", maxCount: 10 },
+    { name: "DummydescriptionImages", maxCount: 10 },
+    { name: "DummyvariantImages", maxCount: 20 },
   ]),
   parseMultipartJson,
  auth,

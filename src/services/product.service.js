@@ -170,7 +170,7 @@ console.log("After variants processing:----", body.variants);
       );
     }
     /* ---------- SAVE PRODUCT ---------- */
-    console.log("Final product data to save:----",);
+    console.log("Final product data to save:----",body);
     const product = await Product.create(body);
 
     /* ---------- AUDIT ---------- */
@@ -183,11 +183,10 @@ console.log("After variants processing:----", body.variants);
       permission: body.permission || "create_product",
       actionType: "Create",
     });
-
     return product;
   } catch (error) {
     /* ---------- ROLLBACK UPLOADED FILES ---------- */
-    await Promise.all(uploadedFiles.map((key) => deleteFromS3(key)));
+    // await Promise.all(uploadedFiles.map((key) => deleteFromS3(key)));
     throw new Error(error.message || "Failed to add product");
   }
 };
