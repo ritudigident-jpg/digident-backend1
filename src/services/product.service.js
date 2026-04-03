@@ -47,7 +47,7 @@ const uploadFiles = async (files = [], folder, uploadedFiles = []) => {
  */
 export const addProductService = async ({ body, files, user }) => {
   const uploadedFiles = [];
-
+  console.log("Service called with body:----", body);
   try {
     /* ---------- VALIDATE USER ---------- */
     if (!user?.email) {
@@ -71,14 +71,11 @@ export const addProductService = async ({ body, files, user }) => {
     body.description = Array.isArray(body.description) ? body.description : [];
     body.specification = Array.isArray(body.specification) ? body.specification : [];
     body.variants = Array.isArray(body.variants) ? body.variants : [];
-
     /* ---------- PRODUCT IMAGES ---------- */
     if (files?.productImages?.length) {
       body.images = await uploadFiles(files.productImages, "products", uploadedFiles);
-    } else {
-      body.images = [];
-    }
-
+    } 
+    console.log("After product images upload:----", uploadedFiles);
     /* ---------- DESCRIPTION IMAGES ---------- */
     const descFiles = files?.descriptionImages || [];
     const descMap = Array.isArray(body.descriptionImageMap)
@@ -97,7 +94,7 @@ export const addProductService = async ({ body, files, user }) => {
 
       groupedDesc[idx].push(file);
     });
-
+console.log("Grouped description files:----", groupedDesc); 
     body.description = await Promise.all(
       body.description.map(async (desc, index) => {
         const paragraphFiles = groupedDesc[index] || [];
@@ -118,7 +115,7 @@ export const addProductService = async ({ body, files, user }) => {
       ...spec,
       specId: uuidv6(),
     }));
-
+console.log("After specification processing:----");
     /* ---------- VARIANT IMAGES ---------- */
     const varFiles = files?.variantImages || [];
     const varMap = Array.isArray(body.variantImageMap)
@@ -144,7 +141,7 @@ export const addProductService = async ({ body, files, user }) => {
         const urls = variantFiles.length
           ? await uploadFiles(variantFiles, "products", uploadedFiles)
           : [];
-
+       console.log(`Variant ${index} files uploaded:----`, urls);
         return {
           ...variant,
           variantId: uuidv6(),
@@ -162,7 +159,7 @@ export const addProductService = async ({ body, files, user }) => {
         };
       })
     );
-
+console.log("After variants processing:----", body.variants);
     /* ---------- STOCK VALIDATION ---------- */
     if (
       body.stockType === "VARIANT" &&
@@ -172,14 +169,8 @@ export const addProductService = async ({ body, files, user }) => {
         "Each variant must have its own stock when stockType is VARIANT"
       );
     }
-
-    /* ---------- CLEAN REQUEST-ONLY FIELDS ---------- */
-    const permission = body.permission;
-    delete body.permission;
-    delete body.descriptionImageMap;
-    delete body.variantImageMap;
-
     /* ---------- SAVE PRODUCT ---------- */
+    console.log("Final product data to save:----",);
     const product = await Product.create(body);
 
     /* ---------- AUDIT ---------- */
@@ -189,7 +180,7 @@ export const addProductService = async ({ body, files, user }) => {
       actionByEmail: employee.email,
       actionFor: product._id,
       action: product.name,
-      permission: permission || "create_product",
+      permission: body.permission || "create_product",
       actionType: "Create",
     });
 
