@@ -308,7 +308,7 @@ ProductSchema.virtual("isAvailable").get(function () {
 });
 
 /* ---------- Stock Enforcement ---------- */
-ProductSchema.pre("save", function (next) {
+ProductSchema.pre("save", function () {
   if (this.stockType === "PRODUCT") {
     this.variants.forEach((v) => {
       v.variantStock = 0;
@@ -328,8 +328,6 @@ ProductSchema.pre("save", function (next) {
       );
     }
   }
-
-  return next();
 });
 
 export default model("Product", ProductSchema);
