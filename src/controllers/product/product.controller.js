@@ -17,10 +17,11 @@ import { v6 as uuidv6 } from "uuid";
 async function uploadFiles(files = [], folder, uploadedFiles) {
   return Promise.all(
     files.map(async (file) => {
-      if (!file) {
+      if (!file || !file.buffer) {
         throw new Error("Invalid file sent from frontend");
       }
       const uploaded = await uploadToS3(file, folder);
+      console.log("Uploaded file info:----", uploaded.url);
       uploadedFiles.push(uploaded.key);
       return uploaded.url;
     })
@@ -36,7 +37,6 @@ export const addProduct = async (req, res) => {
     const files = req.files;
     console.log("Received body:", body);
     console.log("Received files:", files);
-
     const {value,error} = validateProductBody(body);
     if(error){
       return ApiResponse.error(res, error.details[0].message, 400);
@@ -46,13 +46,11 @@ export const addProduct = async (req, res) => {
        if (!employee) {
          return ApiResponse.error(res, "Employee not found", 404);
        }
-
     body.productId = uuidv6();
     /* ---------- Product Images ---------- */
     if(files.productImages?.length){
-      body.images = await uploadFiles(files.productImages,"products",uploadedFiles);
+      body.images = await uploadFiles(files.productImages,"Dummyproducts",uploadedFiles);
     }
-
     /* ---------- Description ---------- */
     const descFiles = files.descriptionImages || [];
 // Description
@@ -73,7 +71,7 @@ body.description = await Promise.all(
   body.description.map(async (desc, index) => {
     const files = groupedDesc[index] || [];
     const urls = files.length
-      ? await uploadFiles(files, "products", uploadedFiles)
+      ? await uploadFiles(files, "Dummyproducts", uploadedFiles)
       : [];
 
     return {
@@ -111,7 +109,7 @@ const varMap = Array.isArray(req.body.variantImageMap)
       body.variants.map(async (variant, index) => {
         const files = groupedVar[index] || [];
         const urls = files.length
-          ? await uploadFiles(files, "products", uploadedFiles)
+          ? await uploadFiles(files, "Dummyproducts", uploadedFiles)
           : [];
     
         return {
