@@ -13,7 +13,7 @@ import Employee from "../../models/manage/employee.model.js";
 import Product from "../../models/manage/product.model.js";
 import { PermissionAudit } from "../../models/manage/permissionaudit.model.js";
 import { deleteFromS3, uploadToS3 } from "../../services/awsS3.service.js";
-
+import { v6 as uuidv6 } from "uuid";
 async function uploadFiles(files = [], folder, uploadedFiles) {
   return Promise.all(
     files.map(async (file) => {

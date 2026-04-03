@@ -4,6 +4,7 @@ import upload from "../../middlewares/multer.middleware.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
 import { parseMultipartJson } from "../../middlewares/parseMultipartJso.middleware.js";
+
 const router = express.Router();
 
 router.post(
@@ -18,7 +19,6 @@ router.post(
   checkPermission(),
   addProduct
 );
-
 router.put(
   "/update/:productId",
   upload.fields([
