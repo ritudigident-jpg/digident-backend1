@@ -152,9 +152,9 @@ const varMap = Array.isArray(req.body.variantImageMap)
   } catch (err) {
     console.error("Add Product Error:", err);
     /* ROLLBACK: DELETE UPLOADED IMAGES */
-    await Promise.all(
-      uploadedFiles.map(key => deleteFromS3(key))
-    );
+    // await Promise.all(
+    //   uploadedFiles.map(key => deleteFromS3(key))
+    // );
     return ApiResponse.error(res, err.message, 500);
   }
 };
