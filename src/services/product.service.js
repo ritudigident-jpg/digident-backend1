@@ -434,7 +434,6 @@ export const getProductsByStatusService = async (query) => {
     /* ---------------- QUERY ---------------- */
     const [products, totalProducts] = await Promise.all([
       Product.find(filter)
-        .select("name price images brand category status productId createdAt")
         .populate("brand", "name logoUrl")
         .populate("category", "name")
         .sort(sortOptions)

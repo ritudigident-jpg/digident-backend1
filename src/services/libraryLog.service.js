@@ -1,16 +1,102 @@
-export const sendEmailOtpService = async ({
+import Customer from "../models/ecommarace/libraryLog.model.js";
+import EmailVerifyDummy from "../models/ecommarace/dummyemailverify.model.js";
+import { otpVerificationTemplate } from "../config/templates/otpEmailTemplate.js";
+import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
+import { v6 as uuidv6 } from "uuid";
+import { adminLibraryRequestTemplate} from "../config/templates/adminLibraryRequestTemplat.js";
+import { userLibraryRequestTemplate } from "../config/templates/userLibraryRequestTemplat.js";
+/**
+ * @function sendEmailOtpService
+ *
+ * @params
+ * {
+ *   email
+ * }
+ *
+ * @process
+ * 1. Find customer by email
+ * 2. If already verified, return isVerified true
+ * 3. Generate OTP and expiry
+ * 4. Save or update OTP in EmailVerifyDummy
+ * 5. Send OTP email
+ *
+ * @returns
+ * {
+ *   isVerified: Boolean
+ * }
+ */
+export const sendEmailOtpService = async ({ email }) => {
+  /* ---------- FIND CUSTOMER ---------- */
+  const customer = await Customer.findOne({ email });
+
+  /* ---------- IF EMAIL ALREADY VERIFIED ---------- */
+  if (customer && customer.isEmailVerified) {
+    return { isVerified: true };
+  }
+
+  /* ---------- GENERATE OTP ---------- */
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+  /* ---------- SAVE OR UPDATE OTP ---------- */
+  await EmailVerifyDummy.findOneAndUpdate(
+    { email },
+    { email, otp, otpExpiry },
+    { upsert: true, new: true }
+  );
+
+  /* ---------- SEND OTP EMAIL ---------- */
+  const htmlBody = otpVerificationTemplate(email, otp);
+
+  await sendZohoMail(
+    email,
+    "Your OTP for Email Verification",
+    htmlBody
+  );
+
+  return { isVerified: false };
+};
+
+const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(",") || [];
+
+export const verifyOtpAndCreateCustomerService = async ({
   email,
+  otp,
   libraryObjectId,
   libraryId,
   brandName,
-  category
+  category,
+  firstName,
+  lastName,
+  mobileNumber,
+  companyName,
+  address
 }) => {
-  /* ---------- FIND CUSTOMER ---------- */
-  const customer = await Customer.findOne({ email });
-  /* ---------- IF VERIFIED ---------- */
-  if (customer && customer.isEmailVerified){
+  /* ---------- NORMALIZE EMAIL ---------- */
+  const normalizedEmail = email.toLowerCase().trim();
+
+  /* ---------- FIND EXISTING CUSTOMER ---------- */
+  const existingUser = await Customer.findOne({ email: normalizedEmail });
+
+  /* ---------- SEND LIBRARY REQUEST EMAILS FOR SCANBRIDGE ---------- */
+  if (category.toLowerCase() === "scanbridge") {
+    await sendZohoMail(
+      ADMIN_EMAILS.join(","),
+      `New Library Request for ${brandName} - ${category}`,
+      adminLibraryRequestTemplate(normalizedEmail, brandName, category)
+    );
+
+    await sendZohoMail(
+      normalizedEmail,
+      "Your Library Request Has Been Received",
+      userLibraryRequestTemplate(brandName, category)
+    );
+  }
+
+  /* ---------- IF CUSTOMER ALREADY VERIFIED ---------- */
+  if (existingUser && existingUser.isEmailVerified) {
     await Customer.updateOne(
-      { _id: customer._id },
+      { _id: existingUser._id },
       {
         $push: {
           logLibrary: {
@@ -23,92 +109,79 @@ export const sendEmailOtpService = async ({
         }
       }
     );
-    return { isVerified: true };
+
+    return {
+      userId: existingUser._id,
+      email: existingUser.email,
+      isVerified: true,
+      message: "Email already verified, library log updated"
+    };
   }
 
-  /* ---------- GENERATE OTP ---------- */
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  /* ---------- VALIDATE OTP ---------- */
+  if (!otp) {
+    const error = new Error("OTP is required");
+    error.statusCode = 400;
+    error.errorCode = "OTP_REQUIRED";
+    throw error;
+  }
 
-  const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-  /* ---------- SAVE OTP ---------- */
-  await EmailVerifyDummy.findOneAndUpdate(
-    { email },
-    { email, otp, otpExpiry },
-    { upsert: true, new: true }
-  );
-
-  /* ---------- SEND EMAIL ---------- */
-  const htmlBody = otpVerificationTemplate(email, otp);
-
-  await sendZohoMail(
-    email,
-    "Your OTP for Email Verification",
-    htmlBody
-  );
-
-  return { isVerified: false };
-};
-
-export const verifyOtpAndCreateCustomerService = async (data) => {
-  const { email, otp, ...restBody } = data;
-  const normalizedEmail = email.toLowerCase();
-  /* ---------- VERIFY OTP ---------- */
   const otpRecord = await EmailVerifyDummy.findOne({
     email: normalizedEmail
   });
+
   if (!otpRecord) {
-    throw {
-      message: "OTP not found. Please request again.",
-      statusCode: 400
-    };
+    const error = new Error("OTP not found. Please request again.");
+    error.statusCode = 400;
+    error.errorCode = "OTP_NOT_FOUND";
+    throw error;
   }
+
   if (otpRecord.otp !== otp) {
-    throw {
-      message: "Invalid OTP",
-      statusCode: 400
-    };
+    const error = new Error("Invalid OTP");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_OTP";
+    throw error;
   }
 
   if (otpRecord.otpExpiry < new Date()) {
     await EmailVerifyDummy.deleteOne({ email: normalizedEmail });
 
-    throw {
-      message: "OTP expired. Please request again.",
-      statusCode: 400
-    };
-  }
-
-  /* ---------- CHECK EXISTING CUSTOMER ---------- */
-  const existingCustomer = await Customer.findOne({
-    email: normalizedEmail
-  });
-
-  if (existingCustomer) {
-    return {
-      message: "Email already verified",
-      userId: existingCustomer._id,
-      email: existingCustomer.email,
-      isVerified: true
-    };
+    const error = new Error("OTP expired. Please request again.");
+    error.statusCode = 400;
+    error.errorCode = "OTP_EXPIRED";
+    throw error;
   }
 
   /* ---------- CREATE CUSTOMER ---------- */
   const customer = await Customer.create({
     customerId: uuidv6(),
-    ...restBody,
+    firstName,
+    lastName,
     email: normalizedEmail,
-    isEmailVerified: true
+    mobileNumber,
+    companyName,
+    address,
+    isEmailVerified: true,
+    logLibrary: [
+      {
+        libraryObjectId,
+        libraryId,
+        brandName,
+        category,
+        date: new Date()
+      }
+    ]
   });
 
-  /* ---------- DELETE OTP ---------- */
+  /* ---------- DELETE USED OTP ---------- */
   await EmailVerifyDummy.deleteOne({ email: normalizedEmail });
 
   return {
-    message: "OTP verified and customer created",
     userId: customer._id,
     email: customer.email,
-    isVerified: true
+    isVerified: true,
+    message: "OTP verified and customer created successfully"
   };
 };
 
@@ -237,9 +310,6 @@ export const getLibraryDashboardService = async ({
   };
 };
 
-// services/emailVerify.service.js
-
-import EmailVerifyDummy from "../models/emailVerifyDummyModel.js";
 
 export const deleteOtpByEmailService = async (email) => {
   const deletedRecord = await EmailVerifyDummy.findOneAndDelete({

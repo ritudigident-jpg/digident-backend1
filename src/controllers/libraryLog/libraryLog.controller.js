@@ -1,4 +1,9 @@
-import {sendEmailOtpValidator} from "./libaryLog.validator.js"
+import { handleError, sendError } from "../../helpers/error.helper.js";
+import { sendSuccess } from "../../helpers/response.helper.js";
+import {sendEmailOtpValidator, verifyOtpAndCreateCustomerValidator} from "./libaryLog.validator.js"
+import { sendEmailOtpService, verifyOtpAndCreateCustomerService, getAllConsumersService, getEmailVerifyDummyService, getLibraryDashboardService, deleteOtpByEmailService } from "../../services/libraryLog.service.js";
+import Customer from "../../models/ecommarace/libraryLog.model.js";
+import EmailVerifyDummy from "../../models/ecommarace/dummyemailverify.model.js";
 
 /**
  * @function sendEmailOtp
@@ -62,12 +67,33 @@ import {sendEmailOtpValidator} from "./libaryLog.validator.js"
  * 400: Missing required fields
  * 500: Email sending or DB failure
  */
+
+/**
+ * @function sendEmailOtp
+ *
+ * @params
+ * req.body = {
+ *   email
+ * }
+ *
+ * @process
+ * 1. Validate request body
+ * 2. Call sendEmailOtpService
+ * 3. If email already verified, return verified response
+ * 4. Otherwise generate OTP, save it, and send email
+ *
+ * @response
+ * 200 - Email already verified / OTP sent successfully
+ * 400 - Validation failed
+ * 500 - Internal server error
+ */
 export const sendEmailOtp = async (req, res) => {
   try {
     /* ---------- VALIDATION ---------- */
     const { value, error } = sendEmailOtpValidator.validate(req.body, {
       abortEarly: false
     });
+
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -76,13 +102,16 @@ export const sendEmailOtp = async (req, res) => {
         details: error.details.map((e) => e.message)
       });
     }
+
+    /* ---------- SERVICE ---------- */
     const result = await sendEmailOtpService(value);
+
     return sendSuccess(
       res,
       result,
       200,
       result.isVerified
-        ? "Email already verified. Library logged successfully"
+        ? "Email already verified"
         : "OTP sent to email successfully"
     );
   } catch (error) {
@@ -145,12 +174,42 @@ export const sendEmailOtp = async (req, res) => {
  * 400 OTP_NOT_FOUND → No OTP record
  * 500 INTERNAL_SERVER_ERROR → Server error
  */
+
+/**
+ * @function verifyOtpAndCreateCustomer
+ *
+ * @params
+ * req.body = {
+ *   email,
+ *   otp,
+ *   libraryObjectId,
+ *   libraryId,
+ *   brandName,
+ *   category,
+ *   firstName,
+ *   lastName,
+ *   mobileNumber,
+ *   companyName,
+ *   address
+ * }
+ *
+ * @process
+ * 1. Validate request body
+ * 2. Call verifyOtpAndCreateCustomerService
+ * 3. Return success response
+ *
+ * @response
+ * 200 - OTP verified and customer created successfully / Email already verified, library log updated
+ * 400 - Validation failed
+ * 500 - Internal server error
+ */
 export const verifyOtpAndCreateCustomer = async (req, res) => {
   try {
     /* ---------- VALIDATION ---------- */
-    const { value, error } = verifyOtpValidator.validate(req.body, {
-      abortEarly: false
-    });
+    const { value, error } = verifyOtpAndCreateCustomerValidator.validate(
+      req.body,
+      { abortEarly: false }
+    );
 
     if (error) {
       return sendError(res, {
@@ -161,21 +220,15 @@ export const verifyOtpAndCreateCustomer = async (req, res) => {
       });
     }
 
+    /* ---------- SERVICE ---------- */
     const result = await verifyOtpAndCreateCustomerService(value);
 
-    return sendSuccess(
-      res,
-      result,
-      200,
-      result.message
-    );
-
+    return sendSuccess(res, result, 200, result.message);
   } catch (error) {
-    console.error("verifyOtp Controller Error:", error);
+    console.error("verifyOtpAndCreateCustomer Controller Error:", error);
     return handleError(res, error);
   }
 };
-
 /**
  * @function getCustomerData
  *

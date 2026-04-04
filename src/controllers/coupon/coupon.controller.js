@@ -1,4 +1,4 @@
-import { couponValidator, createCouponValidation } from "./coupon.validator.js";
+import {createCouponValidation, updateCouponValidation } from "./coupon.validator.js";
 import { handleError, sendError } from "../../helpers/error.helper.js";
 import { createCouponService, deleteCouponService, filterCouponsService, getSingleCouponService, updateCouponService } from "../../services/coupon.service.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -71,7 +71,7 @@ export const createCoupon = async (req, res) => {
  */
 export const updateCoupon = async (req, res) => {
   try {
-    const { value, error } = couponValidator.validate(req.body, {
+    const { value, error } = updateCouponValidation.validate(req.body, {
       abortEarly: false
     });
     if (error) {
@@ -146,11 +146,11 @@ export const filterCouponsByStatus = async (req, res) => {
     const { page, limit, skip } = getPagination(req.query);
 
     /* ---------- QUERY PARAM ---------- */
-    const { status } = req.query;
+   const {isActive}  = req.params;
 
     /* ---------- SERVICE ---------- */
     const { coupons, total } = await filterCouponsService({
-      status,
+      isActive,
       skip,
       limit
     });
@@ -166,7 +166,7 @@ export const filterCouponsByStatus = async (req, res) => {
           totalCoupons: total,
           limit
         },
-        status: status || "all"
+        status: isActive || "all"
       },
       200,
       "Coupons fetched successfully"
