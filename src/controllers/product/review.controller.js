@@ -201,7 +201,6 @@ export const updateReview = async (req, res) => {
 export const getAllReviews = async (req, res) => {
   try {
     const { productId } = req.params;
-
     /* ---------- BASIC CHECK ---------- */
     if (!productId) {
       return sendError(res, {

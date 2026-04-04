@@ -108,16 +108,14 @@ const couponSchema = new Schema(
 -----------------------------*/
 couponSchema.pre("save", function (next) {
   if (this.endDate < this.startDate) {
-    return next(new Error("endDate cannot be before startDate"));
+    return new Error("endDate cannot be before startDate");
   }
-  next();
 });
 
 couponSchema.pre("save", function (next) {
   if (this.couponType === "PERCENT" && this.discountValue > 100) {
-    return next(new Error("Percent discount cannot be greater than 100"));
+    return new Error("Percent discount cannot be greater than 100");
   }
-  next();
 });
 
 export default model("Coupon", couponSchema);

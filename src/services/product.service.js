@@ -435,7 +435,7 @@ export const getProductsByStatusService = async (query) => {
     const [products, totalProducts] = await Promise.all([
       Product.find(filter)
         .select("name price images brand category status productId createdAt")
-        .populate("brand", "brandName logoUrl")
+        .populate("brand", "name logoUrl")
         .populate("category", "name")
         .sort(sortOptions)
         .skip(skip)
@@ -462,7 +462,7 @@ export const getProductsByStatusService = async (query) => {
 
 export const getProductByIdService = async (productId) => {
   return await Product.findOne({ productId })
-    .populate("brand", "brandName logoUrl")
+    .populate("brand", "name logoUrl")
     .populate("category", "name")
     .lean();
 };
@@ -484,7 +484,7 @@ export const getBestSellerProductsService = async () => {
         productId: 1,
       }
     )
-      .populate("brand", "brandName")
+      .populate("brand", "name")
       .populate("category", "name")
       .sort({ name: 1 })
       .lean();
