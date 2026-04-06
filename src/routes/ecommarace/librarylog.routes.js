@@ -1,5 +1,5 @@
 import express from "express";
-import {sendEmailOtp,getCustomerData,deleteCustomerData,getAllConsumers,verifyOtpAndCreateCustomer,getEmailVerifyDummy,getAllEmailVerifyDummy,getLibraryDashboard,deleteOtpByEmail} from "../../controllers/libraryLog/libraryLog.controller.js";
+import {sendEmailOtp,getCustomerData,deleteCustomerData,getAllConsumers,verifyOtpAndCreateCustomer,getEmailVerifyDummy,getAllEmailVerifyDummy,getLibraryDashboard,deleteOtpByEmail, getScanbridgeLibrary, updateScanbridgeLibrary} from "../../controllers/libraryLog/libraryLog.controller.js";
 
 const router = express.Router();
 
@@ -25,5 +25,8 @@ router.get("/email-verify-dummy/all", getAllEmailVerifyDummy);
 router.get("/dashboard",getLibraryDashboard);
 
 router.delete("/deleteUser/:email",deleteOtpByEmail);
+
+router.get("/scanbridge", getScanbridgeLibrary);
+router.patch("/scanbridge", updateScanbridgeLibrary);
 
 export default router;

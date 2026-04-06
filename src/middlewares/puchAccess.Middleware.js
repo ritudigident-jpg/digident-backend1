@@ -1,5 +1,5 @@
 import ipRangeCheck from "ip-range-check";
-import { errorResponse, handleError } from "../helpers/error.helper.js";
+import { sendError, handleError } from "../helpers/error.helper.js";
 
 /**
  * @function punchAccessMiddleware
@@ -31,7 +31,7 @@ export const punchAccessMiddleware = (req, res, next) => {
     const isAllowed = ipRangeCheck(userIp, OFFICE_IPS);
 
     if (!isAllowed) {
-      return errorResponse(res, {
+      return sendError(res, {
         message: "Punch-in/out allowed only from office network",
         statusCode: 403,
       });

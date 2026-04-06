@@ -1,9 +1,10 @@
 import { handleError, sendError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
-import {sendEmailOtpValidator, verifyOtpAndCreateCustomerValidator} from "./libaryLog.validator.js"
-import { sendEmailOtpService, verifyOtpAndCreateCustomerService, getAllConsumersService, getEmailVerifyDummyService, getLibraryDashboardService, deleteOtpByEmailService } from "../../services/libraryLog.service.js";
+import {sendEmailOtpValidator, updateScanbridgeLibraryValidator, verifyOtpAndCreateCustomerValidator} from "./libaryLog.validator.js"
+import { sendEmailOtpService, verifyOtpAndCreateCustomerService, getAllConsumersService, getEmailVerifyDummyService, getLibraryDashboardService, deleteOtpByEmailService, getScanbridgeLibraryService, updateScanbridgeLibraryService } from "../../services/libraryLog.service.js";
 import Customer from "../../models/ecommarace/libraryLog.model.js";
 import EmailVerifyDummy from "../../models/ecommarace/dummyemailverify.model.js";
+import { getPagination } from "../../helpers/pagination.helper.js";
 
 /**
  * @function sendEmailOtp
@@ -17,7 +18,7 @@ import EmailVerifyDummy from "../../models/ecommarace/dummyemailverify.model.js"
  *   email: string,
  *   libraryObjectId: string,
  *   libraryId: string,
- *   brandName: string,
+ *   brand: string,
  *   category: string
  * }
  *
@@ -184,7 +185,7 @@ export const sendEmailOtp = async (req, res) => {
  *   otp,
  *   libraryObjectId,
  *   libraryId,
- *   brandName,
+ *   brand,
  *   category,
  *   firstName,
  *   lastName,
@@ -254,7 +255,6 @@ export const verifyOtpAndCreateCustomer = async (req, res) => {
 export const getCustomerData = async (req, res) => {
   try {
     const { customerId } = req.params;
-
     /* ---------- VALIDATION ---------- */
     if (!customerId) {
       return sendError(res, {
@@ -263,7 +263,6 @@ export const getCustomerData = async (req, res) => {
         errorCode: "VALIDATION_ERROR"
       });
     }
-
     const user = await Customer.findOne({ customerId }).lean();
 
     if (!user) {
@@ -279,7 +278,6 @@ export const getCustomerData = async (req, res) => {
       200,
       "User data retrieved successfully"
     );
-
   } catch (error) {
     console.error("Get Customer Data Error:", error);
     return handleError(res, error);
@@ -695,6 +693,92 @@ export const deleteOtpByEmail = async (req, res) => {
 
   } catch (error) {
     console.error("Delete OTP By Email Error:", error);
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function getScanbridgeLibrary
+ *
+ * @process
+ * 1. Fetch all customers having scanbridge category in logLibrary
+ * 2. Flatten scanbridge logs
+ * 3. Return formatted response
+ *
+ * @response
+ * 200 - Scanbridge library fetched successfully
+ * 500 - Internal server error
+ */
+export const getScanbridgeLibrary = async (req, res) => {
+  try {
+    /* ---------- QUERY PARAMS ---------- */
+    const { page = 1, limit = 10 } = req.query;
+
+    /* ---------- SERVICE ---------- */
+    const result = await getScanbridgeLibraryService({ page, limit });
+
+    return sendSuccess(
+      res,
+      result,
+      200,
+      "Scanbridge library fetched successfully"
+    );
+  } catch (error) {
+    console.error("getScanbridgeLibrary Controller Error:", error);
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function updateScanbridgeLibrary
+ *
+ * @params
+ * req.body = {
+ *   customerId,
+ *   logId,
+ *   isdelivered
+ * }
+ *
+ * @process
+ * 1. Validate request body
+ * 2. Find customer and matching library log
+ * 3. Ensure category is scanbridge
+ * 4. Update isdelivered status
+ * 5. Return updated log response
+ *
+ * @response
+ * 200 - Scanbridge library updated successfully
+ * 400 - Validation failed / invalid category
+ * 404 - Customer or library log not found
+ * 500 - Internal server error
+ */
+export const updateScanbridgeLibrary = async (req, res) => {
+  try {
+    /* ---------- VALIDATION ---------- */
+    const { value, error } = updateScanbridgeLibraryValidator.validate(req.body, {
+      abortEarly: false
+    });
+
+    if (error) {
+      return sendError(res, {
+        message: "Validation failed",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        details: error.details.map((e) => e.message)
+      });
+    }
+
+    /* ---------- SERVICE ---------- */
+    const result = await updateScanbridgeLibraryService(value);
+
+    return sendSuccess(
+      res,
+      result,
+      200,
+      "Scanbridge library updated successfully"
+    );
+  } catch (error) {
+    console.error("updateScanbridgeLibrary Controller Error:", error);
     return handleError(res, error);
   }
 };

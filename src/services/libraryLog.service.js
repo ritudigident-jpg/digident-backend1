@@ -5,6 +5,9 @@ import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
 import { v6 as uuidv6 } from "uuid";
 import { adminLibraryRequestTemplate} from "../config/templates/adminLibraryRequestTemplat.js";
 import { userLibraryRequestTemplate } from "../config/templates/userLibraryRequestTemplat.js";
+import { ADMIN_EMAILS } from "../config/adminmail.js"
+import { getPagination } from "../helpers/pagination.helper.js";
+import mongoose from "mongoose";
 /**
  * @function sendEmailOtpService
  *
@@ -57,14 +60,12 @@ export const sendEmailOtpService = async ({ email }) => {
   return { isVerified: false };
 };
 
-const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(",") || [];
-
 export const verifyOtpAndCreateCustomerService = async ({
   email,
   otp,
   libraryObjectId,
   libraryId,
-  brandName,
+  brand,
   category,
   firstName,
   lastName,
@@ -81,15 +82,15 @@ export const verifyOtpAndCreateCustomerService = async ({
   /* ---------- SEND LIBRARY REQUEST EMAILS FOR SCANBRIDGE ---------- */
   if (category.toLowerCase() === "scanbridge") {
     await sendZohoMail(
-      ADMIN_EMAILS.join(","),
-      `New Library Request for ${brandName} - ${category}`,
-      adminLibraryRequestTemplate(normalizedEmail, brandName, category)
+       ADMIN_EMAILS.join(","), 
+      `New Library Request for ${brand} - ${category}`,
+      adminLibraryRequestTemplate(normalizedEmail, brand, category)
     );
 
     await sendZohoMail(
       normalizedEmail,
       "Your Library Request Has Been Received",
-      userLibraryRequestTemplate(brandName, category)
+      userLibraryRequestTemplate(brand, category)
     );
   }
 
@@ -102,7 +103,7 @@ export const verifyOtpAndCreateCustomerService = async ({
           logLibrary: {
             libraryObjectId,
             libraryId,
-            brandName,
+            brand,
             category,
             date: new Date()
           }
@@ -167,7 +168,7 @@ export const verifyOtpAndCreateCustomerService = async ({
       {
         libraryObjectId,
         libraryId,
-        brandName,
+        brand,
         category,
         date: new Date()
       }
@@ -186,7 +187,6 @@ export const verifyOtpAndCreateCustomerService = async ({
 };
 
 export const getAllConsumersService = async ({ skip, limit, page }) => {
-
   const [users, totalUsers] = await Promise.all([
     Customer.find({})
       .sort({ createdAt: -1 })
@@ -258,7 +258,7 @@ export const getLibraryDashboardService = async ({
   };
 
   if (categoryFilter) matchStage["logLibrary.category"] = categoryFilter;
-  if (brandFilter) matchStage["logLibrary.brandName"] = brandFilter;
+  if (brandFilter) matchStage["logLibrary.brand"] = brandFilter;
 
   /* ---------- GROUP STAGE ---------- */
   let groupStage;
@@ -274,7 +274,7 @@ export const getLibraryDashboardService = async ({
 
     case "brand":
       groupStage = {
-        _id: "$logLibrary.brandName",
+        _id: "$logLibrary.brand",
         usageCount: { $sum: 1 },
         lastUsedAt: { $max: "$logLibrary.date" },
       };
@@ -284,7 +284,7 @@ export const getLibraryDashboardService = async ({
       groupStage = {
         _id: "$logLibrary.libraryObjectId",
         libraryId: { $first: "$logLibrary.libraryId" },
-        brandName: { $first: "$logLibrary.brandName" },
+        brand: { $first: "$logLibrary.brand" },
         category: { $first: "$logLibrary.category" },
         usageCount: { $sum: 1 },
         lastUsedAt: { $max: "$logLibrary.date" },
@@ -310,7 +310,6 @@ export const getLibraryDashboardService = async ({
   };
 };
 
-
 export const deleteOtpByEmailService = async (email) => {
   const deletedRecord = await EmailVerifyDummy.findOneAndDelete({
     email: email.toLowerCase(),
@@ -324,4 +323,139 @@ export const deleteOtpByEmailService = async (email) => {
   }
 
   return deletedRecord;
+};
+
+export const getScanbridgeLibraryService = async ({
+  page = 1,
+  limit = 10
+}) => {
+  /* ---------- PARSE PAGINATION ---------- */
+  const currentPage = Number(page) || 1;
+  const perPage = Number(limit) || 10;
+  const skip = (currentPage - 1) * perPage;
+
+  /* ---------- FETCH CUSTOMERS ---------- */
+  const customers = await Customer.find(
+    { "logLibrary.category": { $regex: /^scanbridge$/i } },
+    {
+      firstName: 1,
+      lastName: 1,
+      email: 1,
+      companyName: 1,
+      logLibrary: 1
+    }
+  ).lean();
+
+  /* ---------- PREPARE RESPONSE ---------- */
+  const scanbridgeLibrary = [];
+
+  for (const customer of customers) {
+    const filteredLogs = (customer.logLibrary || []).filter(
+      (item) => item.category?.toLowerCase() === "scanbridge"
+    );
+
+    for (const log of filteredLogs) {
+      scanbridgeLibrary.push({
+        customerId: customer._id,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        email: customer.email,
+        companyName: customer.companyName,
+        logId: log._id,
+        libraryObjectId: log.libraryObjectId || null,
+        libraryId: log.libraryId || null,
+        brand: log.brand || null,
+        category: log.category,
+        isdelivered: log.isdelivered ?? false,
+        date: log.date
+      });
+    }
+  }
+
+  /* ---------- SORT LATEST FIRST ---------- */
+  scanbridgeLibrary.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  /* ---------- PAGINATION ---------- */
+  const total = scanbridgeLibrary.length;
+  const paginatedScanbridgeLibrary = scanbridgeLibrary.slice(
+    skip,
+    skip + perPage
+  );
+
+  return {
+    scanbridgeLibrary: paginatedScanbridgeLibrary,
+    pagination: getPagination({
+      total,
+      page: currentPage,
+      limit: perPage
+    })
+  };
+};
+
+export const updateScanbridgeLibraryService = async ({
+  customerId,
+  logId,
+  isdelivered
+}) => {
+  /* ---------- VALIDATE OBJECT IDS ---------- */
+  if (!mongoose.Types.ObjectId.isValid(customerId)) {
+    const error = new Error("Invalid customerId");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_CUSTOMER_ID";
+    throw error;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(logId)) {
+    const error = new Error("Invalid logId");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_LOG_ID";
+    throw error;
+  }
+
+  /* ---------- FIND CUSTOMER ---------- */
+  const customer = await Customer.findOne({
+    _id: customerId,
+    "logLibrary._id": logId
+  });
+
+  if (!customer) {
+    const error = new Error("Customer or logLibrary not found");
+    error.statusCode = 404;
+    error.errorCode = "CUSTOMER_OR_LIBRARY_LOG_NOT_FOUND";
+    throw error;
+  }
+
+  /* ---------- FIND LIBRARY LOG ---------- */
+  const libraryLog = customer.logLibrary.find(
+    (item) => item._id.toString() === logId.toString()
+  );
+
+  if (!libraryLog) {
+    const error = new Error("Library log not found");
+    error.statusCode = 404;
+    error.errorCode = "LIBRARY_LOG_NOT_FOUND";
+    throw error;
+  }
+
+  /* ---------- CHECK CATEGORY ---------- */
+  if (libraryLog.category?.toLowerCase() !== "scanbridge") {
+    const error = new Error("Only scanbridge category can be updated");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_CATEGORY";
+    throw error;
+  }
+
+  /* ---------- UPDATE STATUS ---------- */
+  libraryLog.isdelivered = isdelivered;
+
+  await customer.save();
+
+  return {
+    customerId: customer._id,
+    logId: libraryLog._id,
+    brand: libraryLog.brand,
+    category: libraryLog.category,
+    isdelivered: libraryLog.isdelivered,
+    date: libraryLog.date
+  };
 };

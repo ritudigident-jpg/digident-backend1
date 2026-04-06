@@ -1,6 +1,6 @@
-import { handleError, sendError } from "../../helpers/error.helper";
-import { sendSuccess } from "../../helpers/response.helper";
-import { cancelLeaveRequestService, createHolidayService, getAllAttendancesService, getAllLeaveRequestsForAdminService, getAllPunchOutRequestsForAdminService, getAttendanceApprovalsByStatusService, getHolidaysService, getLeaveRequestsByStatusService, getMyAttendancesService, getMyAttendanceStatsService, getMyLeaveRequestsService, getMyPunchOutRequestsService, punchInService, punchOutService, sendPunchOutRequestService, updatePunchOutRequestStatusService } from "../../services/attendance.service";
+import { handleError, sendError } from "../../helpers/error.helper.js";
+import { sendSuccess } from "../../helpers/response.helper.js";
+import { cancelLeaveRequestService, createHolidayService, getAllAttendancesService, getAllLeaveRequestsForAdminService, getAllPunchOutRequestsForAdminService, getAttendanceApprovalsByStatusService, getHolidaysService, getLeaveRequestsByStatusService, getMyAttendancesService, getMyAttendanceStatsService, getMyLeaveRequestsService, getMyPunchOutRequestsService, punchInService, punchOutService, requestLeaveService, sendPunchOutRequestService, updateLeaveRequestStatusService, updatePunchOutRequestStatusService } from "../../services/attendance.service.js";
 
 /**
  * @function punchIn
@@ -74,9 +74,7 @@ export const punchIn = async (req, res) => {
         errorCode: "UNAUTHORIZED",
       });
     }
-
     const result = await punchInService(req.user);
-
     return sendSuccess(
       res,
       result,

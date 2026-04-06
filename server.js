@@ -33,6 +33,7 @@ import axios from "axios";
 import { bestSellerCronJob } from "./src/config/cron/bestSeller.js";
 import { autoAbsentCronJob } from "./src/config/cron/autoMarkAbsent.js";
 import { startCouponExpiryCron } from "./src/config/cron/couponExpiryCron.js";
+import Attendance from "./src/routes/manage/attendance.routes.js";
 
 dotenv.config();
 
@@ -147,8 +148,9 @@ app.use("/api/v1/product", productRoutes);
 app.use("/api/v1/stock-audit",stockAudit)
 app.use("/api/v1/permission", permissionRoutes);
 app.use("/api/v1/order", orderRoutes);
-app.use("/api/v1/libarylog", librarylogRoutes);
+app.use("/api/v1/librarylog", librarylogRoutes);
 app.use("/api/v1/aws", awsUploadRoutes);
+app.use("/api/v1/attendance", Attendance);
 /* -------------------------------
    START SERVER
 -------------------------------- */

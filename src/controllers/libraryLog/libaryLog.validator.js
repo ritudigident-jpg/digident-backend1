@@ -19,15 +19,9 @@ export const verifyOtpAndCreateCustomerValidator = Joi.object({
     "string.base": "OTP must be a string"
   }),
 
-  libraryObjectId: Joi.string().optional().messages({
-    "string.empty": "libraryObjectId is required",
-    "any.required": "libraryObjectId is required"
-  }),
+  libraryObjectId: Joi.string().optional(),
 
-  libraryId: Joi.string().optional().messages({
-    "string.empty": "libraryId is required",
-    "any.required": "libraryId is required"
-  }),
+  libraryId: Joi.string().optional(),
 
   brand: Joi.string().required().messages({
     "string.empty": "brand is required",
@@ -53,27 +47,17 @@ export const verifyOtpAndCreateCustomerValidator = Joi.object({
   }).optional()
 });
 
-export const verifyOtpValidator = Joi.object({
-  email: Joi.string().email().required().messages({
-    "string.email": "Invalid email format",
-    "any.required": "Email is required"
+export const updateScanbridgeLibraryValidator = Joi.object({
+  customerId: Joi.string().required().messages({
+    "string.empty": "customerId is required",
+    "any.required": "customerId is required"
   }),
-
-  otp: Joi.string().length(6).required().messages({
-    "string.length": "OTP must be 6 digits",
-    "any.required": "OTP is required"
+  logId: Joi.string().required().messages({
+    "string.empty": "logId is required",
+    "any.required": "logId is required"
   }),
-
-  firstName: Joi.string().required(),
-  lastName: Joi.string().required(),
-  mobileNumber: Joi.string().required(),
-  companyName: Joi.string().required(),
-
-  address: Joi.object({
-    line1: Joi.string().required(),
-    city: Joi.string().required(),
-    state: Joi.string().required(),
-    postalCode: Joi.string().required(),
-    country: Joi.string().required()
-  }).required()
+  isdelivered: Joi.boolean().required().messages({
+    "boolean.base": "isdelivered must be a boolean value",
+    "any.required": "isdelivered is required"
+  })
 });

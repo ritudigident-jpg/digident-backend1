@@ -76,20 +76,19 @@ const employeeRecordSchema = new mongoose.Schema(
 );
 
 // No duplicate dates
-employeeRecordSchema.pre("save", function (next) {
+employeeRecordSchema.pre("save", function () {
   const dates = this.records.map(r => r.date);
   if (new Set(dates).size !== dates.length) {
-    return next(new Error("Duplicate date record not allowed"));
+    return new Error("Duplicate date record not allowed");
   }
-  next();
 });
 
 // Auto-calc worked time + validations
-employeeRecordSchema.pre("save", function (next) {
+employeeRecordSchema.pre("save", function () {
   for (const r of this.records) {
     if (r.dayType === "WORKING" && r.punchIn && r.punchOut) {
       if (r.punchOut < r.punchIn) {
-        return next(new Error("Punch-out cannot be before punch-in"));
+        return new Error("Punch-out cannot be before punch-in");
       }
 
       const diff = r.punchOut - r.punchIn;
@@ -101,11 +100,10 @@ employeeRecordSchema.pre("save", function (next) {
 
     if (r.dayType === "LEAVE" && r.fromDate && r.toDate) {
       if (r.toDate < r.fromDate) {
-        return next(new Error("toDate cannot be before fromDate"));
+        return new Error("toDate cannot be before fromDate");
       }
     }
   }
-  next();
 });
 
 // Returns array of date strings YYYY-MM-DD
@@ -127,8 +125,8 @@ const getUpcomingSundays = (year, startDate) => {
 };
 
 
-employeeRecordSchema.pre("save", function (next) {
-  if (!this.records.length) return next();
+employeeRecordSchema.pre("save", function () {
+  if (!this.records.length) return;
 
   // earliest record date (joining / first activity)
   const firstRecordDate = this.records
@@ -161,8 +159,6 @@ employeeRecordSchema.pre("save", function (next) {
       adminAdjusted: false,
     });
   }
-
-  next();
 });
 
 export const EmployeeRecord = mongoose.model(

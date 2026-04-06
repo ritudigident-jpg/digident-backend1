@@ -1,5 +1,8 @@
-import {Employee} from "../models/manage/employee.model.js"
+import Employee from "../models/manage/employee.model.js"
 import {EmployeeRecord} from "../models/manage/attendance.model.js"
+import { getISTDateString, getISTNow } from "../constants/date.js";
+import { v6 as uuidv6 } from "uuid";
+import { AdminApproval } from "../models/manage/attendanceapproval.model.js";
 
 export const punchInService = async (user) => {
   const normalizedEmail = user.email.toLowerCase().trim();
@@ -153,7 +156,6 @@ export const punchOutService = async (user) => {
       errorCode: "NOT_PUNCHED_IN",
     };
   }
-
   if (todayRecord.punchOut) {
     throw {
       message: "Already punched out today",
@@ -161,7 +163,6 @@ export const punchOutService = async (user) => {
       errorCode: "ALREADY_PUNCHED_OUT",
     };
   }
-
   if (nowIST <= new Date(todayRecord.punchIn)) {
     throw {
       message: "Invalid punch-out time",

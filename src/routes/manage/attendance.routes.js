@@ -2,8 +2,8 @@ import express from "express";
 import { punchIn, punchOut, sendPunchOutRequest, getAllAttendances, getMyAttendances, getAttendanceApprovalsByStatus, requestLeave, getAllLeaveRequestsForAdmin, getAllPunchOutRequestsForAdmin, updatePunchOutRequestStatus,  updateLeaveRequestStatus, cancelLeaveRequest,getMyAttendanceStats,getMyLeaveRequests,getHolidays,createHoliday } from "../../controllers/attendance/attendance.controller.js";
 
 import auth from "../../middlewares/auth.middleware.js";
-import checkAdminRole from "../../middlewares/checkAdminRole.js";
-import { punchAccessMiddleware } from "../../middlewares/punchAccessMiddleware.js";
+import checkAdminRole from "../../middlewares/checkAdminRole.middleware.js";
+import { punchAccessMiddleware } from "../../middlewares/puchAccess.Middleware.js";
 const router = express.Router();
 
 /* ================= EMPLOYEE ROUTES ================= */

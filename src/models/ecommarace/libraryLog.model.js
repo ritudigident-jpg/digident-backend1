@@ -11,7 +11,7 @@ const libraryLogsSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    brandName: {
+    brand: {
       type: String,
       required: true,
       trim: true,
@@ -95,6 +95,5 @@ const customerDataSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 export default mongoose.model("Customer", customerDataSchema);
 
