@@ -8,11 +8,11 @@ const router = express.Router();
 
 /* ================= EMPLOYEE ROUTES ================= */
 // Punch In
-router.post("/punch-in",auth,punchAccessMiddleware, punchIn);
+router.post("/punch-in",auth, punchIn);
 // Punch Out (same day)
-router.post("/punch-out",auth,punchAccessMiddleware, punchOut);
+router.post("/punch-out",auth, punchOut);
 // Send punch-out request (forgot punch-out)
-router.post("/punch-out/request", auth,punchAccessMiddleware, sendPunchOutRequest);
+router.post("/punch-out/request", auth, sendPunchOutRequest);
 // Get logged-in employee attendance
 router.get("/my-attendance", auth, getMyAttendances);
 // Dashboard stats
