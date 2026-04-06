@@ -23,11 +23,13 @@ import { sendError, handleError } from "../helpers/error.helper.js";
 export const punchAccessMiddleware = (req, res, next) => {
   try {
     const userIp = req.userIP;
+    console.log("Punch Access Middleware - User IP:", userIp);
 
     // Skip if IP not provided
     if (!userIp) return next();
 
     const OFFICE_IPS = ["163.53.179.27"];
+    //const OFFICE_IPS = ["192.168.1.1"];
     const isAllowed = ipRangeCheck(userIp, OFFICE_IPS);
 
     if (!isAllowed) {
