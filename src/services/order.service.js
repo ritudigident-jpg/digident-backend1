@@ -14,6 +14,7 @@ import {lowStockAlertTemplate } from "../config/templates/lowStockAlertTemplate.
 import Employee from "../models/manage/employee.model.js";
 import Razorpay from "razorpay";
 import { getPagination } from "../helpers/pagination.helper.js";
+import mongoose from "mongoose";
 
 const razorpayInstance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -516,8 +517,6 @@ export const createOrderService = async (data, currentUser) => {
 //     orderItem,
 //   };
 // };
-
-
 
 export const verifyRazorpayService = async (data, currentUser) => {
   const {
