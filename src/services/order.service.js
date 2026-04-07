@@ -1399,18 +1399,101 @@ export const salesDashboardService = async (data) => {
   };
 };
 
+// export const createReturnRequestService = async (data) => {
+//   const { orderId, returnItems } = data;
+
+//   /* ================= FIND ORDER ================= */
+
+//   const order = await Order.findOne({ orderId }).populate("user");
+
+//   if (!order) {
+//     throw new Error("Order not found");
+//   }
+
+//   const allowedStatuses = ["delivered", "partially_returned"];
+
+//   if (!allowedStatuses.includes(order.orderStatus)) {
+//     throw new Error(
+//       "Only delivered or partially returned orders can be returned"
+//     );
+//   }
+
+//   /* ================= VALIDATE RETURN ITEMS ================= */
+
+//   const validatedItems = [];
+
+//   for (const item of returnItems) {
+//     const { productId, variantId, quantity, reason } = item;
+
+//     if (!productId || !variantId || !quantity || quantity <= 0) {
+//       throw new Error("Invalid return item data");
+//     }
+
+//     const orderItem = order.items.find(
+//       (o) =>
+//         o.productId === productId &&
+//         o.variantId === variantId
+//     );
+
+//     if (!orderItem) {
+//       throw new Error("Product not found in order");
+//     }
+
+//     /* ---------- AVAILABLE QUANTITY ---------- */
+
+//     const availableQuantity =
+//       orderItem.quantity - (orderItem.returnedQuantity || 0);
+
+//     if (quantity > availableQuantity) {
+//       throw new Error(
+//         `Return quantity exceeds available quantity for ${orderItem.productName}`
+//       );
+//     }
+
+//     validatedItems.push({
+//       productId,
+//       variantId,
+//       quantity,
+//       reason: reason || null,
+//     });
+//   }
+
+//   /* ================= CREATE RETURN REQUEST ================= */
+
+//   const newRequestId = uuidv6();
+
+//   order.returnRequests.push({
+//     requestId: newRequestId,
+//     items: validatedItems,
+//     status: "pending",
+//     requestedAt: new Date(),
+//   });
+
+//   await order.save();
+
+//   /* ================= BACKGROUND EMAIL ================= */
+
+//   sendReturnRequestEmails(order, validatedItems).catch((err) => {
+//     console.error("Email background job failed:", err.message);
+//   });
+
+//   return {
+//     orderId: order.orderId,
+//     requestId: newRequestId,
+//   };
+// };
+
 export const createReturnRequestService = async (data) => {
   const { orderId, returnItems } = data;
 
   /* ================= FIND ORDER ================= */
-
   const order = await Order.findOne({ orderId }).populate("user");
 
   if (!order) {
     throw new Error("Order not found");
   }
 
-  const allowedStatuses = ["delivered", "partially_returned"];
+  const allowedStatuses = ["delivered", "partial_returned"];
 
   if (!allowedStatuses.includes(order.orderStatus)) {
     throw new Error(
@@ -1418,48 +1501,53 @@ export const createReturnRequestService = async (data) => {
     );
   }
 
-  /* ================= VALIDATE RETURN ITEMS ================= */
+  if (!Array.isArray(returnItems) || returnItems.length === 0) {
+    throw new Error("Return items are required");
+  }
 
+  /* ================= VALIDATE RETURN ITEMS ================= */
   const validatedItems = [];
 
   for (const item of returnItems) {
     const { productId, variantId, quantity, reason } = item;
 
-    if (!productId || !variantId || !quantity || quantity <= 0) {
+    if (!productId || !variantId || !quantity || Number(quantity) <= 0) {
       throw new Error("Invalid return item data");
     }
 
     const orderItem = order.items.find(
       (o) =>
-        o.productId === productId &&
-        o.variantId === variantId
+        o.productId?.toString() === productId?.toString() &&
+        o.variantId?.toString() === variantId?.toString()
     );
 
     if (!orderItem) {
       throw new Error("Product not found in order");
     }
 
-    /* ---------- AVAILABLE QUANTITY ---------- */
-
     const availableQuantity =
-      orderItem.quantity - (orderItem.returnedQuantity || 0);
+      Number(orderItem.quantity) - Number(orderItem.returnedQuantity || 0);
 
-    if (quantity > availableQuantity) {
+    if (Number(quantity) > availableQuantity) {
       throw new Error(
         `Return quantity exceeds available quantity for ${orderItem.productName}`
       );
     }
 
+    if (orderItem.price == null || Number(orderItem.price) <= 0) {
+      throw new Error(`Invalid price found in order for ${orderItem.productName}`);
+    }
+
     validatedItems.push({
       productId,
       variantId,
-      quantity,
+      quantity: Number(quantity),
+      price: Number(orderItem.price),
       reason: reason || null,
     });
   }
 
   /* ================= CREATE RETURN REQUEST ================= */
-
   const newRequestId = uuidv6();
 
   order.returnRequests.push({
@@ -1471,8 +1559,7 @@ export const createReturnRequestService = async (data) => {
 
   await order.save();
 
-  /* ================= BACKGROUND EMAIL ================= */
-
+  /* ================= EMAIL ================= */
   sendReturnRequestEmails(order, validatedItems).catch((err) => {
     console.error("Email background job failed:", err.message);
   });
@@ -1523,7 +1610,6 @@ export const updatePendingReturnRequestService = async (data) => {
   const { orderId, requestId, returnItems } = data;
 
   /* ================= FIND ORDER ================= */
-
   const order = await Order.findOne({ orderId });
 
   if (!order) {
@@ -1531,9 +1617,8 @@ export const updatePendingReturnRequestService = async (data) => {
   }
 
   /* ================= FIND RETURN REQUEST ================= */
-
   const returnRequest = order.returnRequests.find(
-    (r) => r.requestId === requestId
+    (r) => r.requestId?.toString() === requestId?.toString()
   );
 
   if (!returnRequest) {
@@ -1544,21 +1629,24 @@ export const updatePendingReturnRequestService = async (data) => {
     throw new Error("Only pending requests can be updated");
   }
 
-  /* ================= VALIDATE ITEMS ================= */
+  if (!Array.isArray(returnItems)) {
+    throw new Error("returnItems must be an array");
+  }
 
+  /* ================= VALIDATE ITEMS ================= */
   const validatedItems = [];
 
   for (const item of returnItems) {
     const { productId, variantId, quantity, reason } = item;
 
-    if (!productId || !variantId || !quantity || quantity <= 0) {
+    if (!productId || !variantId || !quantity || Number(quantity) <= 0) {
       throw new Error("Invalid return item data");
     }
 
     const orderItem = order.items.find(
       (o) =>
-        o.productId == productId &&
-        o.variantId == variantId
+        o.productId?.toString() === productId?.toString() &&
+        o.variantId?.toString() === variantId?.toString()
     );
 
     if (!orderItem) {
@@ -1566,26 +1654,32 @@ export const updatePendingReturnRequestService = async (data) => {
     }
 
     /* ---------- QUANTITY CHECK ---------- */
+    const alreadyReturnedQty = Number(orderItem.returnedQuantity || 0);
+    const maxAllowedQty = Number(orderItem.quantity);
 
-    if (quantity > orderItem.quantity) {
+    if (Number(quantity) > maxAllowedQty) {
       throw new Error(
         `Return quantity exceeds ordered quantity for ${orderItem.productName}`
       );
     }
 
+    if (orderItem.price == null || Number(orderItem.price) <= 0) {
+      throw new Error(`Invalid price found in order for ${orderItem.productName}`);
+    }
+
     validatedItems.push({
       productId,
       variantId,
-      quantity,
+      quantity: Number(quantity),
+      price: Number(orderItem.price),
       reason: reason || null,
     });
   }
 
   /* ================= UPDATE / DELETE ================= */
-
   if (validatedItems.length === 0) {
     order.returnRequests = order.returnRequests.filter(
-      (r) => r.requestId !== requestId
+      (r) => r.requestId?.toString() !== requestId?.toString()
     );
   } else {
     returnRequest.items = validatedItems;
