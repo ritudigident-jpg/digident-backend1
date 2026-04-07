@@ -154,6 +154,7 @@ app.use("/api/v1/attendance", Attendance);
 /* -------------------------------
    START SERVER
 -------------------------------- */
+console.log("Starting server...");
 
 const startServer = async () => {
   try {
