@@ -22,21 +22,33 @@ const razorpayInstance = new Razorpay({
 
 export const createOrderService = async (data, currentUser) => {
   if (!currentUser?._id) {
-    throw new Error("Unauthorized user");
+    const error = new Error("Unauthorized user");
+    error.statusCode = 401;
+    error.errorCode = "UNAUTHORIZED";
+    throw error;
   }
 
   const user = await User.findById(currentUser._id).lean();
   if (!user) {
-    throw new Error("User not found");
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    error.errorCode = "USER_NOT_FOUND";
+    throw error;
   }
 
   if (!user.cart) {
-    throw new Error("Cart is empty");
+    const error = new Error("Cart is empty");
+    error.statusCode = 400;
+    error.errorCode = "CART_EMPTY";
+    throw error;
   }
 
   const cart = await Cart.findById(user.cart).lean();
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
-    throw new Error("Cart is empty");
+    const error = new Error("Cart is empty");
+    error.statusCode = 400;
+    error.errorCode = "CART_EMPTY";
+    throw error;
   }
 
   const {
@@ -53,15 +65,24 @@ export const createOrderService = async (data, currentUser) => {
   } = data;
 
   if (!Array.isArray(frontendItems) || frontendItems.length === 0) {
-    throw new Error("Cart is empty or items are required");
+    const error = new Error("Cart is empty or items are required");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_ITEMS";
+    throw error;
   }
 
   if (!addressId) {
-    throw new Error("addressId is required");
+    const error = new Error("addressId is required");
+    error.statusCode = 400;
+    error.errorCode = "ADDRESS_ID_REQUIRED";
+    throw error;
   }
 
   if (!billingAddress || typeof billingAddress !== "object") {
-    throw new Error("billingAddress is required");
+    const error = new Error("billingAddress is required");
+    error.statusCode = 400;
+    error.errorCode = "BILLING_ADDRESS_REQUIRED";
+    throw error;
   }
 
   /* ================= ADDRESS ================= */
@@ -100,7 +121,10 @@ export const createOrderService = async (data, currentUser) => {
   }
 
   if (addressList.length === 0) {
-    throw new Error("No addresses found for user");
+    const error = new Error("No addresses found for user");
+    error.statusCode = 400;
+    error.errorCode = "ADDRESS_NOT_FOUND";
+    throw error;
   }
 
   const selectedAddress =
@@ -115,7 +139,10 @@ export const createOrderService = async (data, currentUser) => {
     );
 
   if (!selectedAddress) {
-    throw new Error("Address not found");
+    const error = new Error("Address not found");
+    error.statusCode = 404;
+    error.errorCode = "ADDRESS_NOT_FOUND";
+    throw error;
   }
 
   const shippingAddress = {
@@ -141,7 +168,10 @@ export const createOrderService = async (data, currentUser) => {
     !shippingAddress.country ||
     !shippingAddress.pincode
   ) {
-    throw new Error("Selected address is incomplete");
+    const error = new Error("Selected address is incomplete");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_ADDRESS";
+    throw error;
   }
 
   /* ================= ITEMS ================= */
@@ -152,7 +182,10 @@ export const createOrderService = async (data, currentUser) => {
     const { productId, variantId, quantity } = item;
 
     if (!productId || !variantId || !quantity || Number(quantity) <= 0) {
-      throw new Error("Invalid item data");
+      const error = new Error("Invalid item data");
+      error.statusCode = 400;
+      error.errorCode = "INVALID_ITEM_DATA";
+      throw error;
     }
 
     const product = await Product.findOne({
@@ -163,11 +196,17 @@ export const createOrderService = async (data, currentUser) => {
       .lean();
 
     if (!product) {
-      throw new Error(`Product unavailable: ${productId}`);
+      const error = new Error(`Product unavailable: ${productId}`);
+      error.statusCode = 404;
+      error.errorCode = "PRODUCT_NOT_FOUND";
+      throw error;
     }
 
     if (!Array.isArray(product.variants) || product.variants.length === 0) {
-      throw new Error(`No variants available for product: ${productId}`);
+      const error = new Error(`No variants available for product: ${productId}`);
+      error.statusCode = 404;
+      error.errorCode = "VARIANTS_NOT_FOUND";
+      throw error;
     }
 
     const variant = product.variants.find(
@@ -175,19 +214,28 @@ export const createOrderService = async (data, currentUser) => {
     );
 
     if (!variant) {
-      throw new Error(`Variant unavailable: ${variantId}`);
+      const error = new Error(`Variant unavailable: ${variantId}`);
+      error.statusCode = 404;
+      error.errorCode = "VARIANT_NOT_FOUND";
+      throw error;
     }
 
     const availableStock = getStock(product, variantId);
     if (availableStock < Number(quantity)) {
-      throw new Error(
+      const error = new Error(
         `Only ${availableStock} item(s) available for ${product.name}`
       );
+      error.statusCode = 400;
+      error.errorCode = "INSUFFICIENT_STOCK";
+      throw error;
     }
 
     const itemPrice = resolvePrice(product, variant);
     if (Number.isNaN(Number(itemPrice)) || Number(itemPrice) <= 0) {
-      throw new Error(`Invalid product price for ${product.name}`);
+      const error = new Error(`Invalid product price for ${product.name}`);
+      error.statusCode = 400;
+      error.errorCode = "INVALID_PRICE";
+      throw error;
     }
 
     const resolvedImages = resolveImages(product, variant);
@@ -226,13 +274,15 @@ export const createOrderService = async (data, currentUser) => {
   const finalDiscount = Math.max(Number(discount) || 0, 0);
   let finalShippingCharge = Math.max(Number(shippingCharge) || 0, 0);
 
-  /* ================= COUPON ================= */
   let appliedCoupon = null;
 
   if (couponId) {
     const coupon = await Coupon.findOne({ couponId }).lean();
     if (!coupon) {
-      throw new Error("Invalid coupon");
+      const error = new Error("Invalid coupon");
+      error.statusCode = 400;
+      error.errorCode = "INVALID_COUPON";
+      throw error;
     }
 
     if (coupon.couponType === "FREESHIP") {
@@ -255,11 +305,14 @@ export const createOrderService = async (data, currentUser) => {
   );
 
   if (grandTotal <= 0) {
-    throw new Error("Invalid order amount");
+    const error = new Error("Invalid order amount");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_ORDER_AMOUNT";
+    throw error;
   }
 
-  /* ================= ORDER DATA ================= */
-  const orderData = {
+  /* ================= ORDER ITEM ================= */
+  const orderItem = {
     orderId: `ORD-${uuidv6()}`,
     user: user._id,
     items,
@@ -289,12 +342,12 @@ export const createOrderService = async (data, currentUser) => {
   const razorpayOrder = await razorpayInstance.orders.create({
     amount: Math.round(grandTotal * 100),
     currency: "INR",
-    receipt: orderData.orderId,
+    receipt: orderItem.orderId,
   });
 
   /* ================= SAVE ORDER ================= */
-  const order = await Order.create({
-    ...orderData,
+  await Order.create({
+    ...orderItem,
     razorpayOrderId: razorpayOrder.id,
   });
 
@@ -302,10 +355,9 @@ export const createOrderService = async (data, currentUser) => {
     razorpayOrderId: razorpayOrder.id,
     amount: razorpayOrder.amount,
     currency: razorpayOrder.currency,
-    order,
+    orderItem,
   };
 };
-
 // export const createOrderService = async (data, currentUser) => {
 //   if (!currentUser?._id) {
 //     throw new Error("Unauthorized User");
