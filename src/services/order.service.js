@@ -15,6 +15,7 @@ import Employee from "../models/manage/employee.model.js";
 import Razorpay from "razorpay";
 import { getPagination } from "../helpers/pagination.helper.js";
 import mongoose from "mongoose";
+import {PermissionAudit} from "../models/manage/permissionaudit.model.js";
 
 const razorpayInstance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -907,14 +908,12 @@ export const cancelOrderService = async (orderId, currentUser, reason) => {
 
 export const markRefundCompletedService = async (orderId) => {
   const order = await Order.findOne({ orderId });
-
   if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
   if (order.orderStatus !== "cancelled") throw Object.assign(new Error("Order is not cancelled"), { statusCode: 400 });
   if (order.paymentStatus === "refunded") throw Object.assign(new Error("Refund already completed"), { statusCode: 400 });
   if (order.paymentStatus !== "refund_pending") throw Object.assign(new Error("Refund not in pending state"), { statusCode: 400 });
   if (!order.razorpayPaymentId) throw Object.assign(new Error("Razorpay paymentId not found"), { statusCode: 400 });
   if (!order.refundAmount || order.refundAmount <= 0) throw Object.assign(new Error("Invalid refund amount"), { statusCode: 400 });
-
   // Process Razorpay refund
   const refund = await razorpayInstance.payments.refund(order.razorpayPaymentId, {
     amount: Math.round(order.refundAmount * 100),
@@ -1099,17 +1098,14 @@ export const getOrdersByStatusService = async (data) => {
 
 export const getAllOrdersAdminService = async ({ page, limit }) => {
   const skip = (page - 1) * limit;
-
   const [orders, total] = await Promise.all([
     Order.find()
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
-
     Order.countDocuments(),
   ]);
-
   return {
     orders,
     pagination: getPagination({ total, page, limit }),
