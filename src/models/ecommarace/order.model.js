@@ -59,7 +59,7 @@ const orderItemSchema = new mongoose.Schema(
 /* ---------- COUPON SNAPSHOT ---------- */
 const couponSchema = new mongoose.Schema(
   {
-    couponRef: {
+    couponRef:{
       type: mongoose.Schema.Types.ObjectId,
       ref: "Coupon",
       default: null,
@@ -68,7 +68,7 @@ const couponSchema = new mongoose.Schema(
     couponId: { type: String, default: null },
     code: { type: String, default: null },
 
-    couponType: {
+    couponType:{
       type: String,
       enum: [
         "PERCENT",

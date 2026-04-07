@@ -208,7 +208,7 @@ export const getCartService = async ({ user }) => {
       productId: { $in: productIds },
       status: "active",
     })
-      .populate("brand", "brandName logoUrl")
+      .populate("brand", "name logoUrl")
       .populate("category", "name")
       .lean();
 

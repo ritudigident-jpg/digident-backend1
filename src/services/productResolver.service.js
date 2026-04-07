@@ -20,6 +20,16 @@ export const resolvePrice = (product, variant) => {
   return variant.variantPrice;
 };
 
+// export const resolvePrice = (product, variant) => {
+//   if (!variant || variant.priceType === "PRODUCT") {
+//     return product.price ?? 0;
+//   }
+//   if (variant.priceType === "VARIANT" && variant.variantPrice == null) {
+//     throw new Error("Variant price required");
+//   }
+//   return variant.variantPrice;
+// };
+
 export const resolveImages = (product, variant) => {
   if (!variant || variant.imageType === "PRODUCT") {
     return product.images ?? [];

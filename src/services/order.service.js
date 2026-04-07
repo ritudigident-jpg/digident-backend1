@@ -3,7 +3,7 @@ import Cart from "../models/ecommarace/cart.model.js";
 import Product from "../models/manage/product.model.js";
 import Coupon from "../models/manage/coupon.model.js";
 import { v6 as uuidv6 } from "uuid";
-import { getStock } from "../services/productResolver.service.js";
+import { getStock,resolvePrice,resolveImages  } from "../services/productResolver.service.js";
 import crypto from "crypto";
 import Order from "../models/ecommarace/order.model.js";
 import Payment from "../models/ecommarace/paymentaudit.model.js";
@@ -13,6 +13,7 @@ import { orderConfirmationTemplate } from "../config/templates/orderConfirmation
 import {lowStockAlertTemplate } from "../config/templates/lowStockAlertTemplate.js";
 import Employee from "../models/manage/employee.model.js";
 import Razorpay from "razorpay";
+import { getPagination } from "../helpers/pagination.helper.js";
 
 const razorpayInstance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -21,19 +22,23 @@ const razorpayInstance = new Razorpay({
 
 export const createOrderService = async (data, currentUser) => {
   if (!currentUser?._id) {
-    throw new Error("Unauthorized User");
+    throw new Error("Unauthorized user");
   }
-  const user = await User.findById(currentUser._id);
+
+  const user = await User.findById(currentUser._id).lean();
   if (!user) {
     throw new Error("User not found");
   }
+
   if (!user.cart) {
     throw new Error("Cart is empty");
   }
-  const cart = await Cart.findById(user.cart);
-  if (!cart || cart.items.length === 0) {
+
+  const cart = await Cart.findById(user.cart).lean();
+  if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
     throw new Error("Cart is empty");
   }
+
   const {
     addressId,
     billingAddress,
@@ -46,52 +51,127 @@ export const createOrderService = async (data, currentUser) => {
     gstPercentage = 0,
     items: frontendItems,
   } = data;
+
   if (!Array.isArray(frontendItems) || frontendItems.length === 0) {
-    throw new Error("Cart is empty or Items are required");
+    throw new Error("Cart is empty or items are required");
   }
-  if (!addressId || !billingAddress) {
-    throw new Error("Address fields missing");
+
+  if (!addressId) {
+    throw new Error("addressId is required");
   }
+
+  if (!billingAddress || typeof billingAddress !== "object") {
+    throw new Error("billingAddress is required");
+  }
+
   /* ================= ADDRESS ================= */
-  const selectedAddress = user.addresses.find(
-    (addr) => addr.addressId.toString() === addressId.toString()
-  );
+  const possibleAddressSources = [
+    user.addresses,
+    user.shippingAddress,
+    user.shippingAddresses,
+    user.address,
+  ];
+
+  let addressList = [];
+
+  for (const source of possibleAddressSources) {
+    if (Array.isArray(source) && source.length > 0) {
+      addressList = source;
+      break;
+    }
+  }
+
+  if (
+    addressList.length === 0 &&
+    user.shippingAddress &&
+    typeof user.shippingAddress === "object" &&
+    !Array.isArray(user.shippingAddress)
+  ) {
+    addressList = [user.shippingAddress];
+  }
+
+  if (
+    addressList.length === 0 &&
+    user.address &&
+    typeof user.address === "object" &&
+    !Array.isArray(user.address)
+  ) {
+    addressList = [user.address];
+  }
+
+  if (addressList.length === 0) {
+    throw new Error("No addresses found for user");
+  }
+
+  const selectedAddress =
+    addressList.find(
+      (addr) => addr?.addressId?.toString() === addressId?.toString()
+    ) ||
+    addressList.find(
+      (addr) => addr?._id?.toString() === addressId?.toString()
+    ) ||
+    addressList.find(
+      (addr) => addr?.id?.toString() === addressId?.toString()
+    );
+
   if (!selectedAddress) {
     throw new Error("Address not found");
   }
+
   const shippingAddress = {
-    fullName: `${selectedAddress.firstName} ${selectedAddress.lastName || ""}`.trim(),
-    phone: selectedAddress.phone,
-    street: selectedAddress.street,
-    area: selectedAddress.area,
-    city: selectedAddress.city,
-    state: selectedAddress.state,
-    country: selectedAddress.country,
-    pincode: selectedAddress.pincode,
+    fullName:
+      selectedAddress.fullName ||
+      `${selectedAddress.firstName || ""} ${selectedAddress.lastName || ""}`.trim(),
+    phone: selectedAddress.phone || "",
+    street: selectedAddress.street || "",
+    area: selectedAddress.area || "",
+    city: selectedAddress.city || "",
+    state: selectedAddress.state || "",
+    country: selectedAddress.country || "",
+    pincode: selectedAddress.pincode || "",
   };
+
+  if (
+    !shippingAddress.fullName ||
+    !shippingAddress.phone ||
+    !shippingAddress.street ||
+    !shippingAddress.area ||
+    !shippingAddress.city ||
+    !shippingAddress.state ||
+    !shippingAddress.country ||
+    !shippingAddress.pincode
+  ) {
+    throw new Error("Selected address is incomplete");
+  }
 
   /* ================= ITEMS ================= */
   let subtotal = 0;
-  let items = [];
+  const items = [];
 
   for (const item of frontendItems) {
     const { productId, variantId, quantity } = item;
 
-    if (!productId || !variantId || !quantity) {
+    if (!productId || !variantId || !quantity || Number(quantity) <= 0) {
       throw new Error("Invalid item data");
     }
 
     const product = await Product.findOne({
       productId,
       status: "active",
-    }).populate("category", "name");
+    })
+      .populate("category", "name")
+      .lean();
 
     if (!product) {
       throw new Error(`Product unavailable: ${productId}`);
     }
 
+    if (!Array.isArray(product.variants) || product.variants.length === 0) {
+      throw new Error(`No variants available for product: ${productId}`);
+    }
+
     const variant = product.variants.find(
-      (v) => v.variantId === variantId
+      (v) => v?.variantId?.toString() === variantId?.toString()
     );
 
     if (!variant) {
@@ -99,60 +179,64 @@ export const createOrderService = async (data, currentUser) => {
     }
 
     const availableStock = getStock(product, variantId);
-
-    if (availableStock < quantity) {
+    if (availableStock < Number(quantity)) {
       throw new Error(
         `Only ${availableStock} item(s) available for ${product.name}`
       );
     }
 
-    const itemPrice = variant.price;
-
-    if (!itemPrice || itemPrice <= 0) {
-      throw new Error("Invalid product price");
+    const itemPrice = resolvePrice(product, variant);
+    if (Number.isNaN(Number(itemPrice)) || Number(itemPrice) <= 0) {
+      throw new Error(`Invalid product price for ${product.name}`);
     }
 
-    const itemTotal = itemPrice * quantity;
+    const resolvedImages = resolveImages(product, variant);
+    const primaryImage =
+      resolvedImages?.[0]?.url ||
+      resolvedImages?.[0] ||
+      "";
+
+    const itemTotal = Number(itemPrice) * Number(quantity);
     subtotal += itemTotal;
 
     const attrObj = {};
     if (Array.isArray(variant.attributes)) {
-      variant.attributes.forEach((attr) => {
-        attrObj[attr.key] = attr.value;
-      });
+      for (const attr of variant.attributes) {
+        if (attr?.key) {
+          attrObj[attr.key] = attr.value;
+        }
+      }
     }
 
     items.push({
       productId,
       variantId,
       sku: variant.sku || product.sku || "",
-      productName: product.name,
+      productName: product.name || "",
       variantName: variant.name || "",
       categoryName: product.category?.name || "",
-      price: itemPrice,
-      quantity,
+      price: Number(itemPrice),
+      quantity: Number(quantity),
       attributes: attrObj,
-      image: variant?.variantImages?.[0] || product?.images?.[0],
+      image: primaryImage,
     });
   }
 
   /* ================= CALCULATION ================= */
-  const finalDiscount = Math.max(Number(discount), 0);
-  const finalShippingCharge = Math.max(Number(shippingCharge), 0);
-
-  const grandTotal = Math.max(
-    subtotal + finalShippingCharge - finalDiscount,
-    0
-  );
+  const finalDiscount = Math.max(Number(discount) || 0, 0);
+  let finalShippingCharge = Math.max(Number(shippingCharge) || 0, 0);
 
   /* ================= COUPON ================= */
   let appliedCoupon = null;
 
   if (couponId) {
-    const coupon = await Coupon.findOne({ couponId });
-
+    const coupon = await Coupon.findOne({ couponId }).lean();
     if (!coupon) {
       throw new Error("Invalid coupon");
+    }
+
+    if (coupon.couponType === "FREESHIP") {
+      finalShippingCharge = 0;
     }
 
     appliedCoupon = {
@@ -165,19 +249,37 @@ export const createOrderService = async (data, currentUser) => {
     };
   }
 
-  /* ================= ORDER ================= */
-  const orderItem = {
+  const grandTotal = Math.max(
+    subtotal + finalShippingCharge - finalDiscount,
+    0
+  );
+
+  if (grandTotal <= 0) {
+    throw new Error("Invalid order amount");
+  }
+
+  /* ================= ORDER DATA ================= */
+  const orderData = {
     orderId: `ORD-${uuidv6()}`,
     user: user._id,
     items,
     shippingCharge: finalShippingCharge,
     grandTotal,
     coupon: appliedCoupon,
-    billingAddress,
+    billingAddress: {
+      fullName: billingAddress.fullName,
+      phone: billingAddress.phone,
+      street: billingAddress.street,
+      area: billingAddress.area,
+      city: billingAddress.city,
+      state: billingAddress.state,
+      country: billingAddress.country,
+      pincode: billingAddress.pincode,
+    },
     shippingAddress,
     organizationName: organizationName || null,
-    gstAmount,
-    gstPercentage,
+    gstAmount: Number(gstAmount) || 0,
+    gstPercentage: Number(gstPercentage) || 0,
     gstNumber: gstNumber || null,
     paymentStatus: "pending",
     orderStatus: "pending",
@@ -187,17 +289,181 @@ export const createOrderService = async (data, currentUser) => {
   const razorpayOrder = await razorpayInstance.orders.create({
     amount: Math.round(grandTotal * 100),
     currency: "INR",
-    receipt: orderItem.orderId,
+    receipt: orderData.orderId,
+  });
+
+  /* ================= SAVE ORDER ================= */
+  const order = await Order.create({
+    ...orderData,
+    razorpayOrderId: razorpayOrder.id,
   });
 
   return {
     razorpayOrderId: razorpayOrder.id,
     amount: razorpayOrder.amount,
     currency: razorpayOrder.currency,
-    orderItem,
+    order,
   };
 };
 
+// export const createOrderService = async (data, currentUser) => {
+//   if (!currentUser?._id) {
+//     throw new Error("Unauthorized User");
+//   }
+//   const user = await User.findById(currentUser._id);
+//   if (!user) {
+//     throw new Error("User not found");
+//   }
+//   if (!user.cart) {
+//     throw new Error("Cart is empty");
+//   }
+//   const cart = await Cart.findById(user.cart);
+//   if (!cart || cart.items.length === 0) {
+//     throw new Error("Cart is empty");
+//   }
+//   const {
+//     addressId,
+//     billingAddress,
+//     organizationName,
+//     gstNumber,
+//     discount = 0,
+//     shippingCharge = 0,
+//     couponId,
+//     gstAmount = 0,
+//     gstPercentage = 0,
+//     items: frontendItems,
+//   } = data;
+//   if(!Array.isArray(frontendItems) || frontendItems.length === 0){
+//     throw new Error("Cart is empty or Items are required");
+//   }
+//   if(!addressId || !billingAddress){
+//     throw new Error("Address fields missing");
+//   }
+//   /* ================= ADDRESS ================= */
+//   const selectedAddress = user.shippingAddress.find(
+//     (addr) => addr.addressId.toString() === addressId.toString()
+//   );
+//   if (!selectedAddress) {
+//     throw new Error("Address not found");
+//   }
+//   const shippingAddress = {
+//     fullName: `${selectedAddress.firstName} ${selectedAddress.lastName || ""}`.trim(),
+//     phone: selectedAddress.phone,
+//     street: selectedAddress.street,
+//     area: selectedAddress.area,
+//     city: selectedAddress.city,
+//     state: selectedAddress.state,
+//     country: selectedAddress.country,
+//     pincode: selectedAddress.pincode,
+//   };
+//   /* ================= ITEMS ================= */
+//   let subtotal = 0;
+//   let items = [];
+//   for(const item of frontendItems){
+//     const { productId, variantId, quantity } = item;
+//     if (!productId || !variantId || !quantity) {
+//       throw new Error("Invalid item data");
+//     }
+//     const product = await Product.findOne({
+//       productId,
+//       status: "active",
+//     }).populate("category", "name");
+
+//     if (!product) {
+//       throw new Error(`Product unavailable: ${productId}`);
+//     }
+//     const variant = product.variants.find(
+//       (v) => v.variantId === variantId
+//     );
+//     if (!variant) {
+//       throw new Error(`Variant unavailable: ${variantId}`);
+//     }
+//     const availableStock = getStock(product, variantId);
+//     if(availableStock < quantity){
+//       throw new Error(
+//         `Only ${availableStock} item(s) available for ${product.name}`
+//       );
+//     }
+//     const itemPrice = variant.price;
+//     if (!itemPrice || itemPrice <= 0) {
+//       throw new Error("Invalid product price");
+//     }
+//     const itemTotal = itemPrice * quantity;
+//     subtotal += itemTotal;
+//     const attrObj = {};
+//     if (Array.isArray(variant.attributes)) {
+//       variant.attributes.forEach((attr) => {
+//         attrObj[attr.key] = attr.value;
+//       });
+//     }
+//     items.push({
+//       productId,
+//       variantId,
+//       sku: variant.sku || product.sku || "",
+//       productName: product.name,
+//       variantName: variant.name || "",
+//       categoryName: product.category?.name || "",
+//       price: itemPrice,
+//       quantity,
+//       attributes: attrObj,
+//       image: variant?.variantImages?.[0] || product?.images?.[0],
+//     });
+//   }
+
+//   /* ================= CALCULATION ================= */
+//   const finalDiscount = Math.max(Number(discount), 0);
+//   const finalShippingCharge = Math.max(Number(shippingCharge), 0);
+
+//   const grandTotal = Math.max(
+//     subtotal + finalShippingCharge - finalDiscount,
+//     0
+//   );
+//   /* ================= COUPON ================= */
+//   let appliedCoupon = null;
+//   if (couponId) {
+//     const coupon = await Coupon.findOne({ couponId });
+//     if (!coupon) {
+//       throw new Error("Invalid coupon");
+//     }
+//     appliedCoupon = {
+//       couponRef: coupon._id,
+//       couponId: coupon.couponId,
+//       code: coupon.code,
+//       couponType: coupon.couponType,
+//       discountAmount: finalDiscount,
+//       freeShipping: coupon.couponType === "FREESHIP",
+//     };
+//   }
+//   /* ================= ORDER ================= */
+//   const orderItem = {
+//     orderId: `ORD-${uuidv6()}`,
+//     user: user._id,
+//     items,
+//     shippingCharge: finalShippingCharge,
+//     grandTotal,
+//     coupon: appliedCoupon,
+//     billingAddress,
+//     shippingAddress,
+//     organizationName: organizationName || null,
+//     gstAmount,
+//     gstPercentage,
+//     gstNumber: gstNumber || null,
+//     paymentStatus: "pending",
+//     orderStatus: "pending",
+//   };
+//   /* ================= RAZORPAY ================= */
+//   const razorpayOrder = await razorpayInstance.orders.create({
+//     amount: Math.round(grandTotal * 100),
+//     currency: "INR",
+//     receipt: orderItem.orderId,
+//   });
+//   return {
+//     razorpayOrderId: razorpayOrder.id,
+//     amount: razorpayOrder.amount,
+//     currency: razorpayOrder.currency,
+//     orderItem,
+//   };
+// };
 export const verifyRazorpayService = async (data, currentUser) => {
   const {
     razorpay_order_id,
@@ -205,38 +471,30 @@ export const verifyRazorpayService = async (data, currentUser) => {
     razorpay_signature,
     orderItem,
   } = data;
-
   /* ================= VALIDATION ================= */
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     throw new Error("Missing payment details");
   }
-
   if (!orderItem) {
     throw new Error("Invalid order data");
   }
-
   if (!currentUser?._id) {
     throw new Error("Unauthorized user");
   }
-
   /* ================= VERIFY SIGNATURE ================= */
   const body = `${razorpay_order_id}|${razorpay_payment_id}`;
-
   const expectedSignature = crypto
     .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
     .update(body)
     .digest("hex");
-
   if (expectedSignature !== razorpay_signature) {
     throw new Error("Invalid Razorpay signature");
   }
-
   /* ================= USER ================= */
   const user = await User.findById(currentUser._id);
   if (!user) {
     throw new Error("User not found");
   }
-
   /* ================= PAYMENT ================= */
   await Payment.create({
     paymentId: uuidv6(),
@@ -248,7 +506,6 @@ export const verifyRazorpayService = async (data, currentUser) => {
     amount: orderItem.grandTotal,
     status: "success",
   });
-
   /* ================= ORDER CREATE ================= */
   const order = await Order.create({
     ...orderItem,
@@ -258,7 +515,6 @@ export const verifyRazorpayService = async (data, currentUser) => {
     paymentStatus: "paid",
     orderStatus: "placed",
   });
-
   const lowStockProducts = [];
   const deductedProducts = [];
 
@@ -276,7 +532,6 @@ export const verifyRazorpayService = async (data, currentUser) => {
     );
 
     if (!variant) throw new Error(`Variant not found: ${item.variantId}`);
-
     if (product.stockType === "PRODUCT") {
       product.productStock -= item.quantity;
 
@@ -289,7 +544,6 @@ export const verifyRazorpayService = async (data, currentUser) => {
       }
     } else {
       variant.variantStock -= item.quantity;
-
       if (variant.variantStock < 50) {
         lowStockProducts.push({
           productName: product.name,
@@ -298,16 +552,13 @@ export const verifyRazorpayService = async (data, currentUser) => {
         });
       }
     }
-
     deductedProducts.push({
       productId: item.productId,
       variantId: item.variantId,
       quantity: item.quantity,
     });
-
     await product.save();
   }
-
   /* ================= STOCK LOG ================= */
   if (deductedProducts.length > 0) {
     await StockAuditLog.create({
@@ -321,7 +572,6 @@ export const verifyRazorpayService = async (data, currentUser) => {
   await Cart.findByIdAndUpdate(user.cart, {
     $set: { items: [] },
   });
-
   user.orderHistory.push({ orderId: order._id });
   await user.save();
 
@@ -333,43 +583,34 @@ export const verifyRazorpayService = async (data, currentUser) => {
       order.grandTotal,
       order.items
     );
-
     await sendZohoMail(
       user.email,
       "Payment Successful - Order Confirmed",
       emailHtml
     );
-
     await sendLowStockAlertToAdmins(lowStockProducts);
   } catch (err) {
     console.log("EMAIL ERROR:", err.message);
   }
-
   return order;
 };
-
 export const getUserOrdersService = async (query, currentUser) => {
   if (!currentUser?._id) {
     throw new Error("Unauthorized user");
   }
-
   /* ---------- PAGINATION ---------- */
   const page = Math.max(parseInt(query.page) || 1, 1);
   const limit = Math.max(parseInt(query.limit) || 10, 1);
   const skip = (page - 1) * limit;
-
   /* ---------- FILTER ---------- */
   const { month, year } = query;
   const filter = { user: currentUser._id };
-
   if (month && year) {
     const m = Number(month);
     const y = Number(year);
-
     if (isNaN(m) || isNaN(y) || m < 1 || m > 12 || y < 2000) {
       throw new Error("Invalid month or year");
     }
-
     filter.createdAt = {
       $gte: new Date(y, m - 1, 1),
       $lt: new Date(y, m, 1),
