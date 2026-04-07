@@ -91,7 +91,6 @@ export const registerUser = async (req, res) => {
  *   }
  * }
  */
-
 export const loginUser = async (req, res) => {
   try {
     const { value, error } = validateLoginBody(req.body);
@@ -138,7 +137,6 @@ export const loginUser = async (req, res) => {
  * @response
  * 200 { success: true, message: "Email verified successfully! You can now log in." }
  */
-
 export const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
@@ -179,8 +177,6 @@ export const verifyEmail = async (req, res) => {
  * @response
  * 200 { success: true, message: "Logged out successfully" }
  */
-
-//LOGOUT
 export const logoutUser = async (req, res) => {
   try {
     res.clearCookie("refreshToken", {
@@ -223,11 +219,10 @@ export const logoutUser = async (req, res) => {
  * @response
  * 200 { success: true, message: "Access token refreshed successfully", data: { accessToken: string } }
  */
-
 export const refreshAccessToken = async (req, res) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
-    if (!refreshToken) {
+    if (!refreshToken){
       return sendError(res, {
         message: "Refresh token is required",
         statusCode: 401,
@@ -261,7 +256,6 @@ export const refreshAccessToken = async (req, res) => {
  * @response
  * Redirects user to Google authentication page
  */
-
 export const googleAuth = passport.authenticate("google", {
   scope: ["profile", "email"],
 });
@@ -283,7 +277,6 @@ export const googleAuth = passport.authenticate("google", {
  * @response
  * Redirects user to frontend success page after successful authentication
  */
-
 export const googleCallback = (req, res, next) => {
   passport.authenticate("google", { session: false }, async (err, user) => {
     try {
@@ -359,7 +352,6 @@ export const microsoftCallback = (req, res, next) => {
         path: "/",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
-
       return res.redirect(
         `${process.env.FRONTEND_URL}/oauth-success?accessToken=${accessToken}`
       );
@@ -388,7 +380,6 @@ export const microsoftCallback = (req, res, next) => {
  * @response
  * 200 { success: true, message: "Users fetched successfully", data: { users, pagination } }
  */
-
  export const getAllUsers = async (req, res) => {
    try {
     const { page, limit, skip } = getPagination(req.query);
@@ -437,11 +428,9 @@ export const microsoftCallback = (req, res, next) => {
  * @response
  * 200 { success: true, message: "User deleted successfully", data: { userId } }
  */
-
 export const deleteUserById = async (req, res) => {
   try {
     const { userId } = req.params;
-
     if (!userId) {
       return sendError(res, {
         message: "userId is required",
@@ -449,9 +438,7 @@ export const deleteUserById = async (req, res) => {
         errorCode: "USER_ID_REQUIRED",
       });
     }
-
     const deletedUser = await User.findOneAndDelete({ userId });
-
     if (!deletedUser) {
       return sendError(res, {
         message: "User not found",
