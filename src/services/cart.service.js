@@ -250,7 +250,7 @@ export const getCartService = async ({ user }) => {
           brand: brand
             ? {
                 id: brand._id,
-                name: brand.brandName,
+                name: brand.name,
                 logo: brand.logoUrl || "",
               }
             : null,
