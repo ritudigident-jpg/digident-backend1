@@ -34,13 +34,13 @@ import { bestSellerCronJob } from "./src/config/cron/bestSeller.js";
 import { autoAbsentCronJob } from "./src/config/cron/autoMarkAbsent.js";
 import { startCouponExpiryCron } from "./src/config/cron/couponExpiryCron.js";
 import Attendance from "./src/routes/manage/attendance.routes.js";
+import { ipAnalyticsMiddleware } from "./src/middlewares/ipAnalytics.middleware.js";  
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(cookieParser());
-app.use(passport.initialize());
+
 
 // Load Environment
 env.config({
@@ -126,7 +126,7 @@ app.use(async (req, res, next) => {
 
   next();
 });
-
+app.use(ipAnalyticsMiddleware);
 /* -------------------------------
    USER ROUTES
 -------------------------------- */

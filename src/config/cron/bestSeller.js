@@ -1,10 +1,11 @@
 import cron from "node-cron";
-import  Order  from "../../models/ecommarace/cart.model.js";
+import  Order  from "../../models/ecommarace/order.model.js";
 import Product from "../../models/manage/product.model.js";
 
 export const bestSellerCronJob = () => {
   // Run every 1 hour
-  cron.schedule("0 0 8 * * *", async () => {
+   cron.schedule("0 0 8 * * *", async () => {
+     //cron.schedule("* * * * * *", async () => {
     try {
       console.log("Running Best Selling Cron Job");
 
@@ -15,7 +16,6 @@ export const bestSellerCronJob = () => {
          console.log("No orders found. Skipping Best Seller Cron Job.");
          return;
        }
-       
       // 1️⃣ Aggregate top-selling products
       const bestSellers = await Order.aggregate([
         {
