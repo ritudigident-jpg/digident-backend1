@@ -516,6 +516,9 @@ export const createOrderService = async (data, currentUser) => {
 //     orderItem,
 //   };
 // };
+
+
+
 export const verifyRazorpayService = async (data, currentUser) => {
   const {
     razorpay_order_id,
@@ -523,50 +526,74 @@ export const verifyRazorpayService = async (data, currentUser) => {
     razorpay_signature,
     orderItem,
   } = data;
+
   /* ================= VALIDATION ================= */
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     throw new Error("Missing payment details");
   }
-  if (!orderItem) {
+
+  if (!orderItem?.orderId) {
     throw new Error("Invalid order data");
   }
+
   if (!currentUser?._id) {
     throw new Error("Unauthorized user");
   }
+
   /* ================= VERIFY SIGNATURE ================= */
   const body = `${razorpay_order_id}|${razorpay_payment_id}`;
   const expectedSignature = crypto
     .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
     .update(body)
     .digest("hex");
+
   if (expectedSignature !== razorpay_signature) {
     throw new Error("Invalid Razorpay signature");
   }
+
   /* ================= USER ================= */
   const user = await User.findById(currentUser._id);
   if (!user) {
     throw new Error("User not found");
   }
+
+  /* ================= FIND EXISTING ORDER ================= */
+  const order = await Order.findOne({
+    orderId: orderItem.orderId,
+    user: currentUser._id,
+    razorpayOrderId: razorpay_order_id,
+  });
+
+  if (!order) {
+    throw new Error("Order not found");
+  }
+
+  /* ================= PREVENT DOUBLE PAYMENT PROCESS ================= */
+  if (order.paymentStatus === "paid") {
+    throw new Error("Order is already paid");
+  }
+
   /* ================= PAYMENT ================= */
   await Payment.create({
     paymentId: uuidv6(),
-    order: orderItem.orderId,
+    order: order.orderId,
     user: user._id,
     razorpayOrderId: razorpay_order_id,
     razorpayPaymentId: razorpay_payment_id,
     razorpaySignature: razorpay_signature,
-    amount: orderItem.grandTotal,
+    amount: order.grandTotal,
     status: "success",
   });
-  /* ================= ORDER CREATE ================= */
-  const order = await Order.create({
-    ...orderItem,
-    razorpayOrderId: razorpay_order_id,
-    razorpayPaymentId: razorpay_payment_id,
-    razorpaySignature: razorpay_signature,
-    paymentStatus: "paid",
-    orderStatus: "placed",
-  });
+
+  /* ================= UPDATE ORDER ================= */
+  order.razorpayPaymentId = razorpay_payment_id;
+  order.razorpaySignature = razorpay_signature;
+  order.paymentStatus = "paid";
+  order.orderStatus = "placed";
+  order.paidAt = new Date();
+
+  await order.save();
+
   const lowStockProducts = [];
   const deductedProducts = [];
 
@@ -577,13 +604,18 @@ export const verifyRazorpayService = async (data, currentUser) => {
       status: "active",
     });
 
-    if (!product) throw new Error(`Product not found: ${item.productId}`);
+    if (!product) {
+      throw new Error(`Product not found: ${item.productId}`);
+    }
 
     const variant = product.variants.find(
       (v) => v.variantId === item.variantId
     );
 
-    if (!variant) throw new Error(`Variant not found: ${item.variantId}`);
+    if (!variant) {
+      throw new Error(`Variant not found: ${item.variantId}`);
+    }
+
     if (product.stockType === "PRODUCT") {
       product.productStock -= item.quantity;
 
@@ -596,6 +628,7 @@ export const verifyRazorpayService = async (data, currentUser) => {
       }
     } else {
       variant.variantStock -= item.quantity;
+
       if (variant.variantStock < 50) {
         lowStockProducts.push({
           productName: product.name,
@@ -604,13 +637,16 @@ export const verifyRazorpayService = async (data, currentUser) => {
         });
       }
     }
+
     deductedProducts.push({
       productId: item.productId,
       variantId: item.variantId,
       quantity: item.quantity,
     });
+
     await product.save();
   }
+
   /* ================= STOCK LOG ================= */
   if (deductedProducts.length > 0) {
     await StockAuditLog.create({
@@ -624,6 +660,7 @@ export const verifyRazorpayService = async (data, currentUser) => {
   await Cart.findByIdAndUpdate(user.cart, {
     $set: { items: [] },
   });
+
   user.orderHistory.push({ orderId: order._id });
   await user.save();
 
@@ -635,17 +672,21 @@ export const verifyRazorpayService = async (data, currentUser) => {
       order.grandTotal,
       order.items
     );
+
     await sendZohoMail(
       user.email,
       "Payment Successful - Order Confirmed",
       emailHtml
     );
+
     await sendLowStockAlertToAdmins(lowStockProducts);
   } catch (err) {
     console.log("EMAIL ERROR:", err.message);
   }
+
   return order;
 };
+
 export const getUserOrdersService = async (query, currentUser) => {
   if (!currentUser?._id) {
     throw new Error("Unauthorized user");
