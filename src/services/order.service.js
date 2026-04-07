@@ -905,7 +905,6 @@ export const cancelOrderService = async (orderId, currentUser, reason) => {
   }
 };
 
-
 export const markRefundCompletedService = async (orderId) => {
   const order = await Order.findOne({ orderId });
   if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
