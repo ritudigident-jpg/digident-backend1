@@ -29,12 +29,13 @@ import awsUploadRoutes from "./src/routes/ecommarace/aws.routes.js"
 import razorpayWebhookRoutes from "./src/routes/ecommarace/razorpaywebhook.routes.js";
 import cors from "cors";
 import {morganMiddleware} from "./src/middlewares/morganLogger.middleware.js";
+import {ipAnalyticsMiddleware} from "./src/middlewares/ipanalytic.middleware.js";
 import axios from "axios";
 import { bestSellerCronJob } from "./src/config/cron/bestSeller.js";
 import { autoAbsentCronJob } from "./src/config/cron/autoMarkAbsent.js";
 import { startCouponExpiryCron } from "./src/config/cron/couponExpiryCron.js";
 import Attendance from "./src/routes/manage/attendance.routes.js";
-import {ipAnalyticsMiddleware} from "./src/middlewares/ipAnalytics.middleware.js";
+
 
 
 dotenv.config();
