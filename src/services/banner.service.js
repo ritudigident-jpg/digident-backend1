@@ -155,7 +155,7 @@ export const getProductsByBannerService = async ({
 
 export const getAllBannersService = async ({ page, limit, skip }) => {
   try {
-    const banners = await Banner.find({ isActive: true })
+    const banners = await Banner.find({})
       .sort({ displayOrder: 1 }) // better than createdAt for banners
       .skip(skip)
       .limit(limit)

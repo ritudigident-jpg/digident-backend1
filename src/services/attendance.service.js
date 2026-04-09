@@ -591,7 +591,6 @@ export const updatePunchOutRequestStatusService = async (
       errorCode: "ADMIN_NOT_FOUND",
     };
   }
-
   // ===== FIND APPROVAL =====
   const approval = await AdminApproval.findOne({ approvalId });
   if (!approval) {
@@ -823,7 +822,6 @@ export const updateLeaveRequestStatusService = async (
       errorCode: "EMPLOYEE_RECORD_NOT_FOUND",
     };
   }
-
   const start = new Date(fromDate);
   const end = new Date(toDate);
 
