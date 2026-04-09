@@ -28,7 +28,7 @@ export const punchAccessMiddleware = (req, res, next) => {
     // Skip if IP not provided
     if (!userIp) return next();
 
-    const OFFICE_IPS = ["163.53.179.27"];
+    const OFFICE_IPS = ["150.107.241.0/24"];
     //const OFFICE_IPS = ["192.168.1.1"];
     const isAllowed = ipRangeCheck(userIp, OFFICE_IPS);
 

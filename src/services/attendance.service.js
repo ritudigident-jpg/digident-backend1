@@ -610,35 +610,9 @@ export const updatePunchOutRequestStatusService = async (
     };
   }
 
-  // ===== HANDLE REJECTION =====
-  if (action === "REJECTED") {
-    approval.status = "REJECTED";
-    approval.actionBy = admin._id;
-    approval.actionAt = new Date();
-    approval.rejectionReason = rejectionReason || "Not specified";
-    await approval.save();
-
-    return {
-      approvalId: approval.approvalId,
-      employee: approval.employee,
-      status: "REJECTED",
-      actionBy: admin.email,
-      actionAt: approval.actionAt,
-      rejectionReason: approval.rejectionReason,
-    };
-  }
-
-  // ===== APPROVAL FLOW =====
   const { employee, recordDate, requestData } = approval;
-  const requestedPunchOut = requestData?.requestedPunchOut;
-  if (!requestedPunchOut) {
-    throw {
-      message: "Invalid punch-out request data",
-      statusCode: 400,
-      errorCode: "INVALID_REQUEST_DATA",
-    };
-  }
 
+  // ===== FIND EMPLOYEE RECORD =====
   const record = await EmployeeRecord.findOne({ employee });
   if (!record) {
     throw {
@@ -654,6 +628,50 @@ export const updatePunchOutRequestStatusService = async (
       message: "Day record not found",
       statusCode: 404,
       errorCode: "DAY_RECORD_NOT_FOUND",
+    };
+  }
+
+  // ===== HANDLE REJECTION =====
+  if (action === "REJECTED") {
+    day.requiresAdminApproval = false;
+    day.adminAdjusted = true;
+    day.punchOut = null;
+    day.totalWorkedTime = {
+      hours: 0,
+      minutes: 0,
+    };
+
+    day.status = day.status.filter(
+      (s) => !["PRESENT", "ABSENT", "HALF_DAY", "EARLY_GOING"].includes(s)
+    );
+    day.status.push("ABSENT");
+
+    await record.save();
+
+    approval.status = "REJECTED";
+    approval.actionBy = admin._id;
+    approval.actionAt = new Date();
+    approval.rejectionReason = rejectionReason || "Not specified";
+    await approval.save();
+
+    return {
+      approvalId: approval.approvalId,
+      employee: approval.employee,
+      date: recordDate,
+      status: day.status,
+      actionBy: admin.email,
+      actionAt: approval.actionAt,
+      rejectionReason: approval.rejectionReason,
+    };
+  }
+
+  // ===== APPROVAL FLOW =====
+  const requestedPunchOut = requestData?.requestedPunchOut;
+  if (!requestedPunchOut) {
+    throw {
+      message: "Invalid punch-out request data",
+      statusCode: 400,
+      errorCode: "INVALID_REQUEST_DATA",
     };
   }
 
@@ -675,7 +693,7 @@ export const updatePunchOutRequestStatusService = async (
 
   // ===== APPLY PUNCH-OUT =====
   const punchOutTime = new Date(requestedPunchOut);
-  if (isNaN(punchOutTime)) {
+  if (isNaN(punchOutTime.getTime())) {
     throw {
       message: "Invalid punch-out time",
       statusCode: 400,
