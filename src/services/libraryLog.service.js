@@ -246,13 +246,10 @@ export const getLibraryDashboardService = async ({
   const matchStage = {
     "logLibrary.date": { $gte: startDate },
   };
-
   if (categoryFilter) matchStage["logLibrary.category"] = categoryFilter;
   if (brandFilter) matchStage["logLibrary.brand"] = brandFilter;
-
   /* ---------- GROUP STAGE ---------- */
   let groupStage;
-
   switch (groupBy) {
     case "category":
       groupStage = {
@@ -282,7 +279,7 @@ export const getLibraryDashboardService = async ({
   }
 
   /* ---------- AGGREGATION ---------- */
-  const data = await Customer.aggregate([
+  const data = await CustomerData.aggregate([
     { $unwind: "$logLibrary" },
     { $match: matchStage },
     { $group: groupStage },
@@ -364,7 +361,6 @@ export const getScanbridgeLibraryService = async ({
 
   /* ---------- SORT LATEST FIRST ---------- */
   scanbridgeLibrary.sort((a, b) => new Date(b.date) - new Date(a.date));
-
   /* ---------- PAGINATION ---------- */
   const total = scanbridgeLibrary.length;
   const paginatedScanbridgeLibrary = scanbridgeLibrary.slice(

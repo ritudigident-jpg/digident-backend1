@@ -384,6 +384,7 @@ export const getProductsByStatusService = async (query) => {
   try {
     /* ---------------- PAGINATION ---------------- */
     const { page = 1, limit = 12, skip = 0 } = query.pagination || {};
+    console.log("Pagination params:----", { page, limit, skip });
 
     /* ---------------- FILTERS ---------------- */
     const {
