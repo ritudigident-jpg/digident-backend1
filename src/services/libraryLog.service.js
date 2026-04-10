@@ -184,7 +184,7 @@ export const getAllConsumersService = async ({ skip, limit, page }) => {
       .limit(limit)
       .lean(),
 
-    Customer.countDocuments()
+    CustomerData.countDocuments()
   ]);
 
   return {
