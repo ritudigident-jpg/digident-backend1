@@ -448,6 +448,7 @@ export const getProductsByStatus = async (req, res) => {
   try {
     /* ---------------- PAGINATION ---------------- */
     const pagination = getPagination(req.query);
+
     /* ---------------- QUERY PARAMS ---------------- */
     const {
       search,
@@ -473,14 +474,14 @@ export const getProductsByStatus = async (req, res) => {
     const allowedSortFields = ["name", "price", "createdAt"];
     const safeSortBy = allowedSortFields.includes(sortBy)
       ? sortBy
-      :"createdAt";
+      : "createdAt";
 
     const safeSortOrder = sortOrder === "asc" ? "asc" : "desc";
 
     /* ---------------- SERVICE CALL ---------------- */
     const result = await getProductsByStatusService({
       pagination,
-      filters:{
+      filters: {
         search,
         category,
         brand,
@@ -492,17 +493,24 @@ export const getProductsByStatus = async (req, res) => {
       },
     });
 
-    const { products, totalProducts, totalPages, currentPage } = result;
+    const { products, totalProducts } = result;
+
+    const totalPages = Math.ceil(totalProducts / pagination.limit);
+    const currentPage = pagination.page;
+
     /* ---------------- PAGE OVERFLOW ---------------- */
-    if (currentPage > totalPages) {
+    if (totalPages > 0 && currentPage > totalPages) {
       return sendSuccess(
         res,
         {
-          totalProducts,
-          totalPages,
-          currentPage,
-          nextPage: null,
-          prevPage: totalPages || null,
+          pagination: {
+            totalItems: totalProducts,
+            totalPages,
+            currentPage,
+            nextPage: null,
+            prevPage: totalPages,
+            limit: pagination.limit,
+          },
           products: [],
         },
         200,
@@ -514,11 +522,14 @@ export const getProductsByStatus = async (req, res) => {
     return sendSuccess(
       res,
       {
-        totalProducts,
-        totalPages,
-        currentPage,
-        nextPage: currentPage < totalPages ? currentPage + 1 : null,
-        prevPage: currentPage > 1 ? currentPage - 1 : null,
+        pagination: {
+          totalItems: totalProducts,
+          totalPages,
+          currentPage,
+          nextPage: currentPage < totalPages ? currentPage + 1 : null,
+          prevPage: currentPage > 1 ? currentPage - 1 : null,
+          limit: pagination.limit,
+        },
         products,
       },
       200,
@@ -528,7 +539,6 @@ export const getProductsByStatus = async (req, res) => {
     return handleError(res, error);
   }
 };
-
 
 /**
  * @function getProductById

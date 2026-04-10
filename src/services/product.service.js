@@ -380,84 +380,62 @@ export const updateProductService = async ({
 };
 
 
-export const getProductsByStatusService = async (query) => {
-  try {
-    /* ---------------- PAGINATION ---------------- */
-    const { page = 1, limit = 12, skip = 0 } = query.pagination || {};
-    console.log("Pagination params:----", { page, limit, skip });
+export const getProductsByStatusService = async ({ pagination, filters }) => {
+  const { skip, limit, page } = pagination;
+  const {
+    search,
+    category,
+    brand,
+    minPrice,
+    maxPrice,
+    status,
+    sortBy,
+    sortOrder,
+  } = filters;
 
-    /* ---------------- FILTERS ---------------- */
-    const {
-      search,
-      category,
-      brand,
-      minPrice,
-      maxPrice,
-      status,
-      sortBy = "createdAt",
-      sortOrder = "desc",
-    } = query.filters || {};
+  const query = {};
 
-    /* ---------------- BUILD FILTER ---------------- */
-    const filter = {};
-
-    if (status && status !== "all") {
-      filter.status = status;
-    }
-
-    if (search) {
-      filter.name = { $regex: search.trim(), $options: "i" };
-    }
-
-    if (category) {
-      filter.category = category;
-    }
-
-    if (brand) {
-      filter.brand = brand;
-    }
-
-    if (minPrice != null || maxPrice != null) {
-      filter.price = {};
-      if (minPrice != null) filter.price.$gte = Number(minPrice);
-      if (maxPrice != null) filter.price.$lte = Number(maxPrice);
-    }
-
-    /* ---------------- SORT ---------------- */
-    const allowedSortFields = ["name", "price", "createdAt"];
-    const safeSortBy = allowedSortFields.includes(sortBy)
-      ? sortBy
-      : "createdAt";
-
-    const sortOptions = {
-      [safeSortBy]: sortOrder === "asc" ? 1 : -1,
-    };
-    /* ---------------- QUERY ---------------- */
-    const [products, totalProducts] = await Promise.all([
-      Product.find(filter)
-        .populate("brand", "brandName logoUrl")
-        .populate("category", "name")
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-
-      Product.countDocuments(filter),
-    ]);
-
-    /* ---------------- RESPONSE ---------------- */
-    const totalPages = Math.ceil(totalProducts / limit) || 1;
-
-    return {
-      products,
-      totalProducts,
-      totalPages,
-      currentPage: page,
-    };
-
-  } catch (error) {
-    throw new Error(error.message || "Failed to fetch products");
+  if (status !== "all") {
+    query.status = status;
   }
+
+  if (search) {
+    query.$text = { $search: search };
+  }
+
+  if (category) {
+    query.category = category;
+  }
+
+  if (brand) {
+    query.brand = brand;
+  }
+
+  if (minPrice || maxPrice) {
+    query["price.amount"] = {};
+    if (minPrice) query["price.amount"].$gte = Number(minPrice);
+    if (maxPrice) query["price.amount"].$lte = Number(maxPrice);
+  }
+
+  const sortOptions = {};
+  if (sortBy === "price") {
+    sortOptions["price.amount"] = sortOrder === "asc" ? 1 : -1;
+  } else {
+    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
+  }
+
+  const totalProducts = await Product.countDocuments(query);
+
+  const products = await Product.find(query)
+    .sort(sortOptions)
+    .skip(skip)
+    .limit(limit);
+
+  return {
+    products,
+    totalProducts,
+    currentPage: page,
+  };
 };
 
 export const getProductByIdService = async (productId) => {
