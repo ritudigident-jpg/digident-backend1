@@ -2,7 +2,7 @@ import { handleError, sendError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
 import {sendEmailOtpValidator, updateScanbridgeLibraryValidator, verifyOtpAndCreateCustomerValidator} from "./libaryLog.validator.js"
 import { sendEmailOtpService, verifyOtpAndCreateCustomerService, getAllConsumersService, getEmailVerifyDummyService, getLibraryDashboardService, deleteOtpByEmailService, getScanbridgeLibraryService, updateScanbridgeLibraryService } from "../../services/libraryLog.service.js";
-import Customer from "../../models/ecommarace/libraryLog.model.js";
+import CustomerData from "../../models/ecommarace/customerData.model.js";
 import EmailVerifyDummy from "../../models/ecommarace/dummyemailverify.model.js";
 import { getPagination } from "../../helpers/pagination.helper.js";
 
@@ -91,11 +91,10 @@ import { getPagination } from "../../helpers/pagination.helper.js";
 export const sendEmailOtp = async (req, res) => {
   try {
     /* ---------- VALIDATION ---------- */
-    const { value, error } = sendEmailOtpValidator.validate(req.body, {
+    const { value, error } = sendEmailOtpValidator.validate(req.body,{
       abortEarly: false
     });
-
-    if (error) {
+    if (error){
       return sendError(res, {
         message: "Validation failed",
         statusCode: 400,
@@ -103,10 +102,8 @@ export const sendEmailOtp = async (req, res) => {
         details: error.details.map((e) => e.message)
       });
     }
-
     /* ---------- SERVICE ---------- */
     const result = await sendEmailOtpService(value);
-
     return sendSuccess(
       res,
       result,
@@ -211,7 +208,6 @@ export const verifyOtpAndCreateCustomer = async (req, res) => {
       req.body,
       { abortEarly: false }
     );
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -220,10 +216,8 @@ export const verifyOtpAndCreateCustomer = async (req, res) => {
         details: error.details.map((e) => e.message)
       });
     }
-
     /* ---------- SERVICE ---------- */
     const result = await verifyOtpAndCreateCustomerService(value);
-
     return sendSuccess(res, result, 200, result.message);
   } catch (error) {
     console.error("verifyOtpAndCreateCustomer Controller Error:", error);
@@ -263,15 +257,13 @@ export const getCustomerData = async (req, res) => {
         errorCode: "VALIDATION_ERROR"
       });
     }
-    const user = await Customer.findOne({ customerId }).lean();
-
+    const user = await CustomerData.findOne({ customerId }).lean();
     if (!user) {
       throw {
         message: "User not found",
         statusCode: 404
       };
     }
-
     return sendSuccess(
       res,
       user,
@@ -315,7 +307,6 @@ export const getCustomerData = async (req, res) => {
 export const deleteCustomerData = async (req, res) => {
   try {
     const { customerId } = req.params;
-
     /* ---------- VALIDATION ---------- */
     if (!customerId) {
       return sendError(res, {
@@ -324,23 +315,19 @@ export const deleteCustomerData = async (req, res) => {
         errorCode: "VALIDATION_ERROR"
       });
     }
-
-    const user = await Customer.findOneAndDelete({ customerId });
-
+    const user = await CustomerData.findOneAndDelete({ customerId });
     if (!user) {
       throw {
         message: "User not found",
         statusCode: 404
       };
     }
-
     return sendSuccess(
       res,
       null,
       200,
       "User data deleted successfully"
     );
-
   } catch (error) {
     console.error("Delete Customer Error:", error);
     return handleError(res, error);
@@ -443,9 +430,7 @@ export const getAllConsumers = async (req, res) => {
 export const getEmailVerifyDummy = async (req, res) => {
   try {
     const { email, page, limit } = req.query;
-
     const { page: pg, limit: lm, skip } = getPagination({ page, limit });
-
     const result = await getEmailVerifyDummyService({
       email,
       skip,
@@ -534,7 +519,7 @@ export const deleteAllOtpAndCustomers = async (req, res) => {
   try {
     const [otpResult, customerResult] = await Promise.all([
       EmailVerifyDummy.deleteMany({}),
-      Customer.deleteMany({}),
+      CustomerData.deleteMany({}),
     ]);
 
     return sendSuccess(
@@ -596,7 +581,7 @@ export const getLibraryDashboard = async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 7;
     const groupBy = req.query.groupBy || "library";
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 12;
     const categoryFilter = req.query.category;
     const brandFilter = req.query.brand;
 
@@ -625,14 +610,12 @@ export const getLibraryDashboard = async (req, res) => {
       categoryFilter,
       brandFilter,
     });
-
     return sendSuccess(
       res,
       result,
       200,
       "Dashboard data fetched successfully"
     );
-
   } catch (error) {
     console.error("Dashboard error:", error);
     return handleError(res, error);
@@ -712,11 +695,9 @@ export const deleteOtpByEmail = async (req, res) => {
 export const getScanbridgeLibrary = async (req, res) => {
   try {
     /* ---------- QUERY PARAMS ---------- */
-    const { page = 1, limit = 10 } = req.query;
-
+    const { page = 1, limit = 12 } = req.query;
     /* ---------- SERVICE ---------- */
     const result = await getScanbridgeLibraryService({ page, limit });
-
     return sendSuccess(
       res,
       result,

@@ -16,19 +16,18 @@ const libraryLogsSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    category: {
+    category:{
       type: String,
       required: true,
       trim: true,
     },
-    date: {
+    date:{
       type: Date,
       default: Date.now,
     },
   },
   { _id: true } // keeps log entry _id
 );
-
 
 const customerDataSchema = new mongoose.Schema(
   {
@@ -95,5 +94,5 @@ const customerDataSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-export default mongoose.model("Customer", customerDataSchema);
+export default mongoose.model("CustomerData", customerDataSchema);
 

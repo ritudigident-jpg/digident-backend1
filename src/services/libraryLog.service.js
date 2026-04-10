@@ -1,4 +1,4 @@
-import Customer from "../models/ecommarace/libraryLog.model.js";
+import CustomerData from "../models/ecommarace/customerData.model.js";
 import EmailVerifyDummy from "../models/ecommarace/dummyemailverify.model.js";
 import { otpVerificationTemplate } from "../config/templates/otpEmailTemplate.js";
 import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
@@ -30,17 +30,14 @@ import mongoose from "mongoose";
  */
 export const sendEmailOtpService = async ({ email }) => {
   /* ---------- FIND CUSTOMER ---------- */
-  const customer = await Customer.findOne({ email });
-
+  const customer = await CustomerData.findOne({ email });
   /* ---------- IF EMAIL ALREADY VERIFIED ---------- */
   if (customer && customer.isEmailVerified) {
     return { isVerified: true };
   }
-
   /* ---------- GENERATE OTP ---------- */
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
   /* ---------- SAVE OR UPDATE OTP ---------- */
   await EmailVerifyDummy.findOneAndUpdate(
     { email },
@@ -77,7 +74,7 @@ export const verifyOtpAndCreateCustomerService = async ({
   const normalizedEmail = email.toLowerCase().trim();
 
   /* ---------- FIND EXISTING CUSTOMER ---------- */
-  const existingUser = await Customer.findOne({ email: normalizedEmail });
+  const existingUser = await CustomerData.findOne({ email: normalizedEmail });
 
   /* ---------- SEND LIBRARY REQUEST EMAILS FOR SCANBRIDGE ---------- */
   if (category.toLowerCase() === "scanbridge") {
@@ -96,7 +93,7 @@ export const verifyOtpAndCreateCustomerService = async ({
 
   /* ---------- IF CUSTOMER ALREADY VERIFIED ---------- */
   if (existingUser && existingUser.isEmailVerified) {
-    await Customer.updateOne(
+    await CustomerData.updateOne(
       { _id: existingUser._id },
       {
         $push: {
@@ -188,7 +185,7 @@ export const verifyOtpAndCreateCustomerService = async ({
 
 export const getAllConsumersService = async ({ skip, limit, page }) => {
   const [users, totalUsers] = await Promise.all([
-    Customer.find({})
+    CustomerData.find({})
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -327,15 +324,15 @@ export const deleteOtpByEmailService = async (email) => {
 
 export const getScanbridgeLibraryService = async ({
   page = 1,
-  limit = 10
+  limit = 12
 }) => {
   /* ---------- PARSE PAGINATION ---------- */
   const currentPage = Number(page) || 1;
-  const perPage = Number(limit) || 10;
+  const perPage = Number(limit) || 12;
   const skip = (currentPage - 1) * perPage;
 
   /* ---------- FETCH CUSTOMERS ---------- */
-  const customers = await Customer.find(
+  const customers = await CustomerData.find(
     { "logLibrary.category": { $regex: /^scanbridge$/i } },
     {
       firstName: 1,
@@ -413,7 +410,7 @@ export const updateScanbridgeLibraryService = async ({
   }
 
   /* ---------- FIND CUSTOMER ---------- */
-  const customer = await Customer.findOne({
+  const customer = await CustomerData.findOne({
     _id: customerId,
     "logLibrary._id": logId
   });

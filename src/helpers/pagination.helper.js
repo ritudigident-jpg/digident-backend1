@@ -11,7 +11,6 @@ export const getPagination = ({
   limit,
 }) => {
   const totalPages = Math.ceil(total / limit);
-
   return {
     totalItems: total,
     totalPages,

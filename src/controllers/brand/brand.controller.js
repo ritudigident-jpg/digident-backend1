@@ -118,7 +118,6 @@ export const createBrand = async (req, res) => {
  */
 export const updateBrand = async (req, res) => {
   try {
-
     /* ---------- VALIDATION ---------- */
     const { value, error } = updateBrandValidator.validate(req.body, {
       abortEarly: false
@@ -310,13 +309,9 @@ export const deleteBrandByBrandId = async (req, res) => {
       200,
       "Brand deleted successfully"
     );
-
   } catch (error) {
-
     console.error("Delete Brand Error:", error);
-
     return handleError(res, error);
-
   }
 };
 
@@ -374,12 +369,8 @@ export const deleteAllBrands = async (req, res) => {
       200,
       "All brands deleted successfully"
     );
-
   } catch (error) {
-
     console.error("Delete All Brands Error:", error);
-
     return handleError(res, error);
-
   }
 };
