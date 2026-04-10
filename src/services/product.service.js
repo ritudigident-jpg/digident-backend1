@@ -383,7 +383,7 @@ export const updateProductService = async ({
 export const getProductsByStatusService = async (query) => {
   try {
     /* ---------------- PAGINATION ---------------- */
-    const { page = 1, limit = 10, skip = 0 } = query.pagination || {};
+    const { page = 1, limit = 12, skip = 0 } = query.pagination || {};
 
     /* ---------------- FILTERS ---------------- */
     const {
@@ -434,7 +434,7 @@ export const getProductsByStatusService = async (query) => {
     /* ---------------- QUERY ---------------- */
     const [products, totalProducts] = await Promise.all([
       Product.find(filter)
-        .populate("brand", "name logoUrl")
+        .populate("brand", "brandName logoUrl")
         .populate("category", "name")
         .sort(sortOptions)
         .skip(skip)
@@ -461,7 +461,7 @@ export const getProductsByStatusService = async (query) => {
 
 export const getProductByIdService = async (productId) => {
   return await Product.findOne({ productId })
-    .populate("brand", "name logoUrl")
+    .populate("brand", "brandName logoUrl")
     .populate("category", "name")
     .lean();
 };
@@ -483,7 +483,7 @@ export const getBestSellerProductsService = async () => {
         productId: 1,
       }
     )
-      .populate("brand", "name")
+      .populate("brand", "brandName")
       .populate("category", "name")
       .sort({ name: 1 })
       .lean();

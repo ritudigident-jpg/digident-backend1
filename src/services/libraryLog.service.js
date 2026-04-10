@@ -44,16 +44,13 @@ export const sendEmailOtpService = async ({ email }) => {
     { email, otp, otpExpiry },
     { upsert: true, new: true }
   );
-
   /* ---------- SEND OTP EMAIL ---------- */
   const htmlBody = otpVerificationTemplate(email, otp);
-
   await sendZohoMail(
     email,
     "Your OTP for Email Verification",
     htmlBody
   );
-
   return { isVerified: false };
 };
 
@@ -72,10 +69,8 @@ export const verifyOtpAndCreateCustomerService = async ({
 }) => {
   /* ---------- NORMALIZE EMAIL ---------- */
   const normalizedEmail = email.toLowerCase().trim();
-
   /* ---------- FIND EXISTING CUSTOMER ---------- */
   const existingUser = await CustomerData.findOne({ email: normalizedEmail });
-
   /* ---------- SEND LIBRARY REQUEST EMAILS FOR SCANBRIDGE ---------- */
   if (category.toLowerCase() === "scanbridge") {
     await sendZohoMail(
@@ -83,14 +78,12 @@ export const verifyOtpAndCreateCustomerService = async ({
       `New Library Request for ${brand} - ${category}`,
       adminLibraryRequestTemplate(normalizedEmail, brand, category)
     );
-
     await sendZohoMail(
       normalizedEmail,
       "Your Library Request Has Been Received",
       userLibraryRequestTemplate(brand, category)
     );
   }
-
   /* ---------- IF CUSTOMER ALREADY VERIFIED ---------- */
   if (existingUser && existingUser.isEmailVerified) {
     await CustomerData.updateOne(
@@ -152,7 +145,7 @@ export const verifyOtpAndCreateCustomerService = async ({
   }
 
   /* ---------- CREATE CUSTOMER ---------- */
-  const customer = await Customer.create({
+  const customer = await CustomerData.create({
     customerId: uuidv6(),
     firstName,
     lastName,
