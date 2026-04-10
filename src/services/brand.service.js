@@ -5,7 +5,7 @@ import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
 const ALLOWED_CATEGORIES = ["Abutment-Level", "General", "Screw-Retained"];
 
 export const createBrandService = async ({
-  name,
+  brandName,
   categories,
   files,
   logoFile,
@@ -15,8 +15,8 @@ export const createBrandService = async ({
   let logoUpload;
   const fileUploads = [];
   try {
-    if(!name){
-      const err = new Error("Brand name is required");
+    if(!brandName){
+      const err = new Error("Brand brandName is required");
       err.statusCode = 400;
       err.errorCode = "VALIDATION_ERROR";
       throw err;
@@ -27,7 +27,7 @@ export const createBrandService = async ({
       err.errorCode = "VALIDATION_ERROR";
       throw err;
     }
-    const existingBrand = await Brand.findOne({ name });
+    const existingBrand = await Brand.findOne({ brandName });
     if (existingBrand) {
       const err = new Error("Brand already exists");
       err.statusCode = 409;
@@ -80,7 +80,7 @@ export const createBrandService = async ({
     /* ---------- SAVE BRAND ---------- */
     const brand = await Brand.create({
       brandId: uuidv6(),
-      name,
+      brandName,
       logoUrl: logoUpload.url,
       files: fileUploads,
     });
@@ -90,7 +90,7 @@ export const createBrandService = async ({
       actionBy: employee._id,
       actionByEmail: employee.email,
       actionFor: brand._id,
-      action: brand.name,
+      action: brand.brandName,
       permission: permission || "create_brand",
       actionType: "Create",
     });
@@ -107,7 +107,7 @@ export const createBrandService = async ({
 
 export const updateBrandService = async ({
   brandId,
-  name,
+  brandName,
   categories,
   removeFileIds,
   files,
@@ -120,7 +120,6 @@ export const updateBrandService = async ({
   const newFileUploads = [];
 
   try {
-
     /* ---------- FIND BRAND ---------- */
     const brand = await Brand.findOne({ brandId });
     if (!brand) {
@@ -128,22 +127,20 @@ export const updateBrandService = async ({
       err.statusCode = 404;
       throw err;
     }
-
-    /* ---------- DUPLICATE NAME CHECK ---------- */
-    if (name && name !== brand.name) {
-      const exist = await Brand.findOne({ name });
+    /* ---------- DUPLICATE brandName CHECK ---------- */
+    if (brandName && brandName !== brand.brandName) {
+      const exist = await Brand.findOne({ brandName });
       if (exist) {
-        const err = new Error("Brand name already exists");
+        const err = new Error("Brand brandName already exists");
         err.statusCode = 409;
         throw err;
       }
-      brand.name = name;
+      brand.brandName = brandName;
     }
 
     /* ---------- UPDATE LOGO ---------- */
     if (logoFile) {
       if (brand.logoUrl) await deleteFromS3(brand.logoUrl);
-
       newLogoUpload = await uploadToS3(logoFile, "brands");
       brand.logoUrl = newLogoUpload.url;
     }
@@ -217,7 +214,7 @@ export const updateBrandService = async ({
       actionBy: employee._id,
       actionByEmail: employee.email,
       actionFor: brand._id,
-      action: brand.name,
+      action: brand.brandName,
       permission: permission || "update_brand",
       actionType: "Update",
     });
@@ -242,7 +239,7 @@ export const getAllBrandsService = async ({ page, limit, skip }) => {
   try {
 
     const brands = await Brand.find()
-      .sort({ name: 1 })
+      .sort({ brandName: 1 })
       .skip(skip)
       .limit(limit)
       .lean();
@@ -338,7 +335,7 @@ export const deleteBrandService = async ({ brandId, employee, permission }) => {
       actionBy: employee._id,
       actionByEmail: employee.email,
       actionFor: brand._id,
-      action: brand.name,
+      action: brand.brandName,
       permission: permission || "delete_brand",
       actionType: "Delete",
     });

@@ -17,7 +17,7 @@ const FileSchema = new Schema(
 const BrandSchema = new Schema(
   {
     brandId: { type: String },
-    name: {
+    brandName: {
       type: String,
       required: [true, "Brand name is required"],
       unique: true,

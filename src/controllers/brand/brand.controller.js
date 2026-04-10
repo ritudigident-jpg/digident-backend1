@@ -47,7 +47,7 @@ export const createBrand = async (req, res) => {
         details: error.details.map((err) => err.message)
       });
     }
-    const { name, categories, permission } = value;
+    const { brandName, categories, permission } = value;
     const logoFile = req.files?.logoUrl?.[0];
     const files = req.files?.file || [];
 
@@ -70,7 +70,7 @@ export const createBrand = async (req, res) => {
       });
     }
     const result = await createBrandService({
-      name,
+      brandName,
       categories,
       files,
       logoFile,
@@ -96,7 +96,7 @@ export const createBrand = async (req, res) => {
  *
  * @description
  * Update brand details including:
- * - brand name
+ * - brand brandName
  * - logo
  * - add/remove files
  *
@@ -113,7 +113,7 @@ export const createBrand = async (req, res) => {
  * @errors
  * 400 - Validation error
  * 404 - Brand/Employee not found
- * 409 - Duplicate brand name
+ * 409 - Duplicate brand brandName
  * 500 - Internal server error
  */
 export const updateBrand = async (req, res) => {
@@ -133,7 +133,7 @@ export const updateBrand = async (req, res) => {
       });
     }
 
-    const { name, categories, removeFileIds, permission } = value;
+    const { brandName, categories, removeFileIds, permission } = value;
 
     const brandId = req.params.brandId;
 
@@ -163,7 +163,7 @@ export const updateBrand = async (req, res) => {
 
     const result = await updateBrandService({
       brandId,
-      name,
+      brandName,
       categories,
       removeFileIds,
       files,

@@ -1,5 +1,5 @@
 import { changePasswordValidation, createEmployeeValidator, loginEmployeeValidator, } from "./employee.validator.js";
-import { changeEmployeePasswordService, createEmployeeService, forgotEmployeePasswordService, getEmployeeService, loginEmployeeService, refreshEmployeeAccessTokenService, resetEmployeePasswordService, updateEmployeeRoleService, verifyEmailService } from "../../../services/auth/employee.service.js";
+import { changeEmployeePasswordService, createEmployeeService, deleteEmployeeService, forgotEmployeePasswordService, getEmployeeService, loginEmployeeService, refreshEmployeeAccessTokenService, resetEmployeePasswordService, updateEmployeeRoleService, verifyEmailService } from "../../../services/auth/employee.service.js";
 import { sendSuccess } from "../../../helpers/response.helper.js";
 import { handleError, sendError } from "../../../helpers/error.helper.js";
 import DeletedEmployee from "../../../models/manage/deleteemployee.model.js";

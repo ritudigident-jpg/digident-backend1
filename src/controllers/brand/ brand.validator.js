@@ -1,13 +1,13 @@
 import Joi from "joi";
 
 export const createBrandValidator = Joi.object({
-  name: Joi.string()
+  brandName: Joi.string()
     .trim()
     .min(2)
     .max(100)
     .required()
     .messages({
-      "string.empty": "Brand name is required"
+      "string.empty": "Brand brandName is required"
     }),
   categories: Joi.alternatives()
     .try(
@@ -18,7 +18,7 @@ export const createBrandValidator = Joi.object({
 });
 
 export const updateBrandValidator = Joi.object({
-  name: Joi.string()
+  brandName: Joi.string()
     .trim()
     .min(2)
     .max(100)
