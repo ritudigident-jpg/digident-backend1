@@ -5,11 +5,10 @@
 //   return { page, limit, skip };
 // };
 
-export const getPagination = ({
-  total,
-  page,
-  limit,
-}) => {
+export const getPagination = (query) => {
+  const page = parseInt(query.page) || 1;
+  const limit = Math.min(parseInt(query.limit) || 12); // default 12
+  const skip = (page - 1) * limit;
   const totalPages = Math.ceil(total / limit);
   return {
     totalItems: total,

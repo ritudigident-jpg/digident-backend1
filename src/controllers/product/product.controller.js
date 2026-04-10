@@ -448,7 +448,6 @@ export const getProductsByStatus = async (req, res) => {
   try {
     /* ---------------- PAGINATION ---------------- */
     const pagination = getPagination(req.query);
-
     /* ---------------- QUERY PARAMS ---------------- */
     const {
       search,
@@ -525,7 +524,6 @@ export const getProductsByStatus = async (req, res) => {
       200,
       "Products fetched successfully"
     );
-
   } catch (error) {
     return handleError(res, error);
   }
@@ -576,7 +574,6 @@ export const getProductById = async (req, res) => {
       200,
       "Product fetched successfully"
     );
-
   } catch (error) {
     return handleError(res, error);
   }
@@ -609,7 +606,6 @@ export const getBestSellerProducts = async (req, res) => {
   try {
     /* ---------------- SERVICE CALL ---------------- */
     const products = await getBestSellerProductsService();
-
     /* ---------------- SUCCESS ---------------- */
     return sendSuccess(
       res,
@@ -617,7 +613,6 @@ export const getBestSellerProducts = async (req, res) => {
       200,
       "Best selling products fetched successfully"
     );
-
   } catch (error) {
     return handleError(res, error);
   }
@@ -653,7 +648,6 @@ export const deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const { permission} = req.body;
-
     /* ---------------- VALIDATION ---------------- */
     if (!productId) {
       return sendError(res, {
@@ -662,7 +656,6 @@ export const deleteProduct = async (req, res) => {
         errorCode: "VALIDATION_ERROR",
       });
     }
-
     /* ---------------- SERVICE CALL ---------------- */
     const result = await deleteProductService({
       productId,
@@ -676,7 +669,6 @@ export const deleteProduct = async (req, res) => {
       200,
       "Product deleted successfully"
     );
-
   } catch (error) {
     return handleError(res, error);
   }
