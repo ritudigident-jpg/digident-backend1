@@ -11,7 +11,7 @@ const libraryLogsSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    brand: {
+    brandName: {
       type: String,
       required: true,
       trim: true,
@@ -20,6 +20,10 @@ const libraryLogsSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+    },
+     isdelivered:{
+      type: Boolean,
+      default: false,
     },
     date:{
       type: Date,

@@ -584,7 +584,6 @@ export const getLibraryDashboard = async (req, res) => {
     const limit = parseInt(req.query.limit) || 12;
     const categoryFilter = req.query.category;
     const brandFilter = req.query.brand;
-
     /* ---------- VALIDATION ---------- */
     if (days < 1) {
       return sendError(res, {
@@ -593,7 +592,6 @@ export const getLibraryDashboard = async (req, res) => {
         errorCode: "VALIDATION_ERROR",
       });
     }
-
     if (!["library", "category", "brand"].includes(groupBy)) {
       return sendError(res, {
         message: "Invalid groupBy value",

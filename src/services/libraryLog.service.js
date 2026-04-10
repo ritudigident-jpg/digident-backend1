@@ -93,7 +93,7 @@ export const verifyOtpAndCreateCustomerService = async ({
           logLibrary: {
             libraryObjectId,
             libraryId,
-            brand,
+            brandName: brand,
             category,
             date: new Date()
           }
@@ -158,7 +158,7 @@ export const verifyOtpAndCreateCustomerService = async ({
       {
         libraryObjectId,
         libraryId,
-        brand,
+        brandName: brand,
         category,
         date: new Date()
       }
@@ -247,7 +247,7 @@ export const getLibraryDashboardService = async ({
     "logLibrary.date": { $gte: startDate },
   };
   if (categoryFilter) matchStage["logLibrary.category"] = categoryFilter;
-  if (brandFilter) matchStage["logLibrary.brand"] = brandFilter;
+  if (brandFilter) matchStage["logLibrary.brandName"] = brandFilter;
   /* ---------- GROUP STAGE ---------- */
   let groupStage;
   switch (groupBy) {
@@ -261,7 +261,7 @@ export const getLibraryDashboardService = async ({
 
     case "brand":
       groupStage = {
-        _id: "$logLibrary.brand",
+        _id: "$logLibrary.brandName",
         usageCount: { $sum: 1 },
         lastUsedAt: { $max: "$logLibrary.date" },
       };
@@ -271,7 +271,7 @@ export const getLibraryDashboardService = async ({
       groupStage = {
         _id: "$logLibrary.libraryObjectId",
         libraryId: { $first: "$logLibrary.libraryId" },
-        brand: { $first: "$logLibrary.brand" },
+        brandName: { $first: "$logLibrary.brandName" },
         category: { $first: "$logLibrary.category" },
         usageCount: { $sum: 1 },
         lastUsedAt: { $max: "$logLibrary.date" },
@@ -308,7 +308,6 @@ export const deleteOtpByEmailService = async (email) => {
     error.errorCode = "OTP_NOT_FOUND";
     throw error;
   }
-
   return deletedRecord;
 };
 
@@ -351,7 +350,7 @@ export const getScanbridgeLibraryService = async ({
         logId: log._id,
         libraryObjectId: log.libraryObjectId || null,
         libraryId: log.libraryId || null,
-        brand: log.brand || null,
+        brandName: log.brandName || null,
         category: log.category,
         isdelivered: log.isdelivered ?? false,
         date: log.date
@@ -439,7 +438,7 @@ export const updateScanbridgeLibraryService = async ({
   return {
     customerId: customer._id,
     logId: libraryLog._id,
-    brand: libraryLog.brand,
+    brandName: libraryLog.brandName || null,
     category: libraryLog.category,
     isdelivered: libraryLog.isdelivered,
     date: libraryLog.date
