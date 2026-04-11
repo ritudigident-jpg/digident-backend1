@@ -15,29 +15,31 @@ import {
   addApplicationNoteService,
   assignApplicationService,
 } from "../../services/jobApplication.service.js";
-import { uploadToS3 } from "../../services/awsS3.service.js";
+import { deleteFromS3, uploadToS3 } from "../../services/awsS3.service.js";
 
-/**
- * Assumes your existing upload helper returns:
- * [
- *   {
- *     filename,
- *     originalName,
- *     url,
- *     key,
- *     mimeType,
- *     sizeBytes
- *   }
- * ]
- */
-// import { uploadFiles } from "../../helpers/s3.helper.js";
-
+const uploadFiles = async (files = [], folder, additionalUploads = []) => {
+  return Promise.all(
+    files.map(async (file) => {
+      if (!file) {
+        throw new Error("Invalid file sent from frontend");
+      }
+      const uploaded = await uploadToS3(file, folder);
+      if (!uploaded?.url){
+        throw new Error("File upload failed");
+      }
+      if (uploaded?.key){
+        additionalUploads.push(uploaded.key);
+      }
+      return uploaded.url;
+    })
+  );
+}; 
 export const submitJobApplication = async (req, res) => {
+  const uploadedKeys = [];
   try {
     const { value, error } = submitJobApplicationValidator.validate(req.body, {
       abortEarly: false,
     });
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -46,7 +48,6 @@ export const submitJobApplication = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
-
     if (!req.files?.resume || req.files.resume.length === 0) {
       return sendError(res, {
         message: "Resume/CV file is required",
@@ -54,18 +55,32 @@ export const submitJobApplication = async (req, res) => {
         errorCode: "RESUME_REQUIRED",
       });
     }
+    /* ---------- UPLOAD RESUME ---------- */
+    const resumeUploaded = await uploadToS3(
+      req.files.resume[0],
+      "careers/resumes"
+    );
 
-    const resumeUploads = await uploadToS3(req.files.resume, "careers/resumes");
+    if (!resumeUploaded?.url) {
+      throw new Error("Resume upload failed");
+    }
+    if (resumeUploaded?.key) {
+      uploadedKeys.push(resumeUploaded.key);
+    }
+    /* ---------- UPLOAD ADDITIONAL FILES ---------- */
     const additionalUploads = req.files?.additionalFiles?.length
-      ? await uploadToS3(req.files.additionalFiles, "careers/additional-files")
+      ? await uploadFiles(
+          req.files.additionalFiles,
+          "careers/additional-files",
+          uploadedKeys
+        )
       : [];
-
+    /* ---------- SAVE APPLICATION ---------- */
     const application = await submitJobApplicationService({
       data: value,
-      resumeFile: resumeUploads[0],
+      resumeFile: resumeUploaded.url,
       additionalFiles: additionalUploads,
     });
-
     return sendSuccess(
       res,
       {
@@ -75,21 +90,21 @@ export const submitJobApplication = async (req, res) => {
       "Application submitted successfully"
     );
   } catch (error) {
+    if (uploadedKeys.length) {
+      await Promise.all(uploadedKeys.map((key) => deleteFromS3(key)));
+    }
     return handleError(res, error);
   }
 };
-
 export const getManageApplications = async (req, res) => {
   try {
     const pagination = getPagination(req.query);
-
     const {
       jobId,
       status = "all",
       search,
       source,
     } = req.query;
-
     const result = await getApplicationsService({
       pagination,
       filters: {

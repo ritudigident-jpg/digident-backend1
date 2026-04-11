@@ -137,11 +137,11 @@ const jobApplicationSchema = new Schema(
     },
 
     resume: {
-      type: fileSchema,
+      type: String,
       required: true,
     },
 
-    additionalFiles: [fileSchema],
+    additionalFiles: [String],
 
     source: {
       type: String,

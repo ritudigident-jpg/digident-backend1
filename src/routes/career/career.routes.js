@@ -2,7 +2,6 @@ import express from "express";
 import  authToken  from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
 
-
 import {
   createJob,
   updateJob,
