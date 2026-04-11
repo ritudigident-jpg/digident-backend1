@@ -35,6 +35,8 @@ export const checkPermission = () => {
       ========================= */
       const userEmail = req.user?.email;
       const requiredPermission = req.body.permission;
+      console.log("Permission Middleware - Required Permission:", requiredPermission);
+      console.log("Permission middleware ---",req.body.permission);
      // Assuming permission is sent in request body
       if (!userEmail) {
         return sendError(res, {
