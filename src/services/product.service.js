@@ -16,10 +16,10 @@ const uploadFiles = async (files = [], folder, uploadedFiles = []) => {
         throw new Error("Invalid file sent from frontend");
       }
       const uploaded = await uploadToS3(file, folder);
-      if (!uploaded?.url) {
+      if (!uploaded?.url){
         throw new Error("File upload failed");
       }
-      if (uploaded?.key) {
+      if (uploaded?.key){
         uploadedFiles.push(uploaded.key);
       }
       return uploaded.url;

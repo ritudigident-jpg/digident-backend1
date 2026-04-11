@@ -50,7 +50,6 @@ export const submitJobApplicationService = async ({
     additionalFiles,
     source: data.source || "career_page",
   });
-
   return application;
 };
 

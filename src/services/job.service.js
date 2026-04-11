@@ -178,7 +178,7 @@ export const getJobBySlugService = async ({ slug }) => {
   return job;
 };
 
-export const deleteJobService = async ({ jobId }) => {
+export const deleteJobService = async ({jobId }) => {
   const job = await Job.findOneAndDelete({ jobId });
 
   if (!job) {

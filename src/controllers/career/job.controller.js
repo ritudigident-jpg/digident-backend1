@@ -114,11 +114,19 @@ export const getManageJobs = async (req, res) => {
       },
     });
 
-    const paginationMeta = getPaginationMeta({
-      totalItems: result.totalJobs,
-      currentPage: pagination.page,
+  /* ---------- PAGINATION META ---------- */
+    const totalItems = result.totalJobs;
+    const currentPage = pagination.page;
+    const totalPages = Math.ceil(totalItems / pagination.limit);
+
+    const paginationMeta = {
+      totalItems,
+      totalPages,
+      currentPage,
+      nextPage: currentPage < totalPages ? currentPage + 1 : null,
+      prevPage: currentPage > 1 ? currentPage - 1 : null,
       limit: pagination.limit,
-    });
+    };
 
     return sendSuccess(
       res,

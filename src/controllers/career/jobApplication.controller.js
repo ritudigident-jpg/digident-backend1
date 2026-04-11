@@ -15,6 +15,7 @@ import {
   addApplicationNoteService,
   assignApplicationService,
 } from "../../services/jobApplication.service.js";
+import { uploadToS3 } from "../../services/awsS3.service.js";
 
 /**
  * Assumes your existing upload helper returns:
@@ -54,9 +55,9 @@ export const submitJobApplication = async (req, res) => {
       });
     }
 
-    const resumeUploads = await uploadFiles(req.files.resume, "careers/resumes");
+    const resumeUploads = await uploadToS3(req.files.resume, "careers/resumes");
     const additionalUploads = req.files?.additionalFiles?.length
-      ? await uploadFiles(req.files.additionalFiles, "careers/additional-files")
+      ? await uploadToS3(req.files.additionalFiles, "careers/additional-files")
       : [];
 
     const application = await submitJobApplicationService({

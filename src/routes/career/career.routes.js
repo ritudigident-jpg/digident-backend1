@@ -1,7 +1,7 @@
 import express from "express";
 import  authToken  from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
-// import { careerUpload } from "../../middlewares/upload.middleware.js";
+
 
 import {
   createJob,
@@ -21,19 +21,21 @@ import {
   addApplicationNote,
   assignApplication,
 } from "../../controllers/career/jobApplication.controller.js";
+import upload from "../../middlewares/multer.middleware.js";
 
 const router = express.Router();
 
 /* ================= PUBLIC CAREER ROUTES ================= */
 router.get("/jobs", getCareerJobs);
 router.get("/jobs/:slug", getJobBySlug);
+router.get("/jobs/id/:jobId", getJobById);
 
 router.post(
   "/apply",
-//   careerUpload.fields([
-//     { name: "resume", maxCount: 1 },
-//     { name: "additionalFiles", maxCount: 5 },
-//   ]),
+  upload.fields([
+    { name: "resume", maxCount: 1 },
+    { name: "additionalFiles", maxCount: 5 },
+  ]),
   submitJobApplication
 );
 
