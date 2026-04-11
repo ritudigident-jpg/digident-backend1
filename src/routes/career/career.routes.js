@@ -57,6 +57,7 @@ router.get(
 router.get(
   "/manage/jobs/:jobId",
   authToken,
+  checkPermission(),
   getJobById
 );
 
