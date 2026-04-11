@@ -21,7 +21,6 @@ import {
   assignApplication,
 } from "../../controllers/career/jobApplication.controller.js";
 import upload from "../../middlewares/multer.middleware.js";
-
 const router = express.Router();
 
 /* ================= PUBLIC CAREER ROUTES ================= */
@@ -47,14 +46,14 @@ router.post(
 );
 
 router.get(
-  "/manage/jobs",
+  "/manage/jobs/:permission",
   authToken,
   checkPermission(),
   getManageJobs
 );
 
 router.get(
-  "/manage/jobs/:jobId",
+  "/manage/jobs/:jobId/:permission",
   authToken,
   checkPermission(),
   getJobById

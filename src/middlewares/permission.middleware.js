@@ -34,7 +34,17 @@ export const checkPermission = () => {
          VALIDATE TOKEN USER
       ========================= */
       const userEmail = req.user?.email;
-      const requiredPermission = req.body.permission || req.query.permission;
+     
+      /* ---------- RESOLVE PERMISSION ---------- */
+      let requiredPermission;
+
+      if (req.method === "GET") {
+        requiredPermission = req.params?.permission;
+      } else {
+        requiredPermission =
+          req.body?.permission ||
+          req.query?.permission;
+      }
       console.log("Permission Middleware - Required Permission:", requiredPermission);
      
      // Assuming permission is sent in request body
