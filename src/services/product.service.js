@@ -426,7 +426,8 @@ export const getProductsByStatusService = async ({ pagination, filters }) => {
 
   const totalProducts = await Product.countDocuments(query);
 
-  const products = await Product.find(query)
+  const products = await Product.find(query).populate("brand", "brandName logoUrl")
+    .populate("category", "name")
     .sort(sortOptions)
     .skip(skip)
     .limit(limit);

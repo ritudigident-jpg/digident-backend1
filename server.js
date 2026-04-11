@@ -35,6 +35,7 @@ import { bestSellerCronJob } from "./src/config/cron/bestSeller.js";
 import { autoAbsentCronJob } from "./src/config/cron/autoMarkAbsent.js";
 import { startCouponExpiryCron } from "./src/config/cron/couponExpiryCron.js";
 import Attendance from "./src/routes/manage/attendance.routes.js";
+import careerRoutes from "./src/routes/career/career.routes.js";
 
 
 
@@ -153,6 +154,7 @@ app.use("/api/v1/order", orderRoutes);
 app.use("/api/v1/librarylog", librarylogRoutes);
 app.use("/api/v1/aws", awsUploadRoutes);
 app.use("/api/v1/attendance", Attendance);
+app.use("/api/v1/career", careerRoutes);
 /* -------------------------------
    START SERVER
 -------------------------------- */
