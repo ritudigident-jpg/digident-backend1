@@ -333,14 +333,19 @@ export const removePermissionFromEmployee = async (req, res) => {
  */
 export const getPermissionAuditLogs = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    /* ---------- QUERY PARAMS ---------- */
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
 
+    /* ---------- SERVICE ---------- */
     const result = await getPermissionAuditLogsService({ page, limit });
 
     return sendSuccess(
       res,
-      result,
+      {
+        pagination: result.pagination,
+        logs: result.logs,
+      },
       200,
       "Permission audit logs fetched successfully"
     );
@@ -348,7 +353,6 @@ export const getPermissionAuditLogs = async (req, res) => {
     return handleError(res, error);
   }
 };
-
 /**
  * @function deleteAllPermissions
  *

@@ -2,6 +2,7 @@ import Job from "../models/manage/job.model.js";
 import JobApplication from "../models/ecommarace/jobApplication.model.js";
 import { v6 as uuidv6 } from "uuid";
 
+
 export const submitJobApplicationService = async ({
   data,
   resumeFile,
@@ -232,7 +233,6 @@ export const updateApplicationStatusService = async ({
   }
 
   await application.save();
-
   return application;
 };
 

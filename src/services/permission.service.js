@@ -256,25 +256,26 @@ export const removePermissionFromEmployeeService = async (
   };
 };
 
+
 export const getPermissionAuditLogsService = async ({ page, limit }) => {
   const skip = (page - 1) * limit;
 
   /* ---------- TOTAL COUNT ---------- */
-  const total = await PermissionAudit.countDocuments();
+  const totalItems = await PermissionAudit.countDocuments();
 
   /* ---------- FETCH LOGS ---------- */
   const logs = await PermissionAudit.find()
-    .populate("actionBy", "email name")
-    .populate("actionFor", "email name")
+    .populate("actionBy", "email firstName lastName name")
+    .populate("actionFor", "email firstName lastName name")
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
 
-  /* ---------- PAGINATION ---------- */
-  const pagination = getPagination({
-    total,
-    page,
+  /* ---------- PAGINATION META ---------- */
+  const pagination = getPaginationMeta({
+    totalItems,
+    currentPage: page,
     limit,
   });
 

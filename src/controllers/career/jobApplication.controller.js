@@ -18,8 +18,81 @@ import {
   updateJobApplicationService
 } from "../../services/jobApplication.service.js";
 import { deleteFromS3, uploadToS3 } from "../../services/awsS3.service.js";
+import { PermissionAudit } from "../../models/manage/permissionaudit.model.js";
+import { v6 as uuidv6 } from "uuid";
+import { sendZohoMail } from "../../services/ZohoEmail/zohoMail.service.js";
+import { applicationSubmittedTemplate } from "../../config/templates/applicationSubmittedTemplate.js";
 
 
+/**
+ * @function submitJobApplication
+ *
+ * @description
+ * Submit a job application for a published career job.
+ * Uploads resume as mandatory file and additional files as optional attachments.
+ *
+ * @params
+ * body: {
+ *   jobId: string,
+ *   firstName: string,
+ *   lastName: string,
+ *   email: string,
+ *   phone: string,
+ *   city?: string,
+ *   state?: string,
+ *   country?: string,
+ *   totalExperienceYears?: number,
+ *   currentCompany?: string,
+ *   currentCTC?: number,
+ *   expectedCTC?: number,
+ *   noticePeriodDays?: number,
+ *   portfolioUrl?: string,
+ *   linkedinUrl?: string,
+ *   githubUrl?: string,
+ *   coverLetter?: string,
+ *   source?: "career_page" | "linkedin" | "naukri" | "referral" | "manual" | "other"
+ * }
+ *
+ * files: {
+ *   resume: File,                  // required
+ *   additionalFiles?: File[]       // optional
+ * }
+ *
+ * @process
+ * 1. Validate request body using submitJobApplicationValidator
+ * 2. Return validation error response if validation fails
+ * 3. Check if resume file is present in req.files.resume
+ * 4. Upload resume file to S3 under careers/resumes
+ * 5. Upload additional files to S3 under careers/additional-files if provided
+ * 6. Store uploaded S3 keys for rollback in case of failure
+ * 7. Call submitJobApplicationService to save application in database
+ * 8. Return success response with generated applicationId
+ * 9. If any step fails after upload, delete uploaded S3 files using stored keys
+ *
+ * @response
+ * 201 {
+ *   success: true,
+ *   message: "Application submitted successfully",
+ *   data: {
+ *     applicationId: string
+ *   }
+ * }
+ *
+ * 400 {
+ *   success: false,
+ *   message: "Validation failed"
+ * }
+ *
+ * 400 {
+ *   success: false,
+ *   message: "Resume/CV file is required"
+ * }
+ *
+ * 500 {
+ *   success: false,
+ *   message: "Internal server error"
+ * }
+ */
 const uploadFiles = async (files = [], folder, additionalUploads = []) => {
   return Promise.all(
     files.map(async (file) => {
@@ -84,6 +157,20 @@ export const submitJobApplication = async (req, res) => {
       resumeFile: resumeUploaded.url,
       additionalFiles: additionalUploads,
     });
+     /* ---------- SEND EMAIL ---------- */
+    const updateUrl = `http://localhost:5174/career/job/applicationId=${application.applicationId}`;
+
+    const htmlBody = applicationSubmittedTemplate({
+      candidateName: `${value.firstName} ${value.lastName}`.trim(),
+      jobTitle: application.jobTitle || null,
+      updateUrl,
+    });
+
+    await sendZohoMail(
+      value.email,
+      "Application Submitted Successfully",
+      htmlBody
+    );
     return sendSuccess(
       res,
       {
@@ -105,29 +192,89 @@ export const submitJobApplication = async (req, res) => {
  *
  * @description
  * Update an existing job application.
+ * Reuses old application data for fields not provided in the request body,
+ * validates the merged payload, uploads new files if provided, and updates
+ * the application record.
+ *
+ * @params
+ * params: {
+ *   applicationId: string
+ * }
+ *
+ * body: {
+ *   jobId?: string,
+ *   firstName?: string,
+ *   lastName?: string,
+ *   email?: string,
+ *   phone?: string,
+ *   city?: string,
+ *   state?: string,
+ *   country?: string,
+ *   totalExperienceYears?: number,
+ *   currentCompany?: string,
+ *   currentCTC?: number,
+ *   expectedCTC?: number,
+ *   noticePeriodDays?: number,
+ *   portfolioUrl?: string,
+ *   linkedinUrl?: string,
+ *   githubUrl?: string,
+ *   coverLetter?: string,
+ *   source?: "career_page" | "linkedin" | "naukri" | "referral" | "manual" | "other"
+ * }
+ *
+ * files: {
+ *   resume?: File,                // optional new resume
+ *   additionalFiles?: File[]      // optional new additional files
+ * }
  *
  * @process
- * 1. Validate applicationId from params
- * 2. Fetch existing application
- * 3. Merge existing data with incoming req.body
- * 4. Validate merged payload using submitJobApplicationValidator
- * 5. Upload new resume if provided
- * 6. Upload additional files if provided
- * 7. Call service to update application
- * 8. Return success response
+ * 1. Read applicationId from request params
+ * 2. Validate applicationId exists
+ * 3. Fetch existing application from database
+ * 4. Return not found response if application does not exist
+ * 5. Merge old application data with incoming request body
+ * 6. Validate merged payload using submitJobApplicationValidator
+ * 7. Upload new resume to S3 if provided
+ * 8. Upload new additional files to S3 if provided
+ * 9. Append new additional files to existing additionalFiles
+ * 10. Call updateJobApplicationService to update application data
+ * 11. Return success response with applicationId
+ * 12. Roll back uploaded S3 files if any error occurs
  *
  * @response
- * 200 { success: true, message: "Application updated successfully" }
- * 400 { success: false, message: "Validation failed" }
- * 404 { success: false, message: "Application not found" }
+ * 200 {
+ *   success: true,
+ *   message: "Application updated successfully",
+ *   data: {
+ *     applicationId: string
+ *   }
+ * }
+ *
+ * 400 {
+ *   success: false,
+ *   message: "Application ID is required"
+ * }
+ *
+ * 400 {
+ *   success: false,
+ *   message: "Validation failed"
+ * }
+ *
+ * 404 {
+ *   success: false,
+ *   message: "Application not found"
+ * }
+ *
+ * 500 {
+ *   success: false,
+ *   message: "Internal server error"
+ * }
  */
 export const updateJobApplication = async (req, res) => {
   const uploadedKeys = [];
-
   try {
     /* ---------- PARAMS ---------- */
     const { applicationId } = req.params;
-
     if (!applicationId) {
       return sendError(res, {
         message: "Application ID is required",
@@ -135,13 +282,11 @@ export const updateJobApplication = async (req, res) => {
         errorCode: "APPLICATION_ID_REQUIRED",
       });
     }
-
     /* ---------- FETCH EXISTING APPLICATION ---------- */
     const existingApplication = await JobApplication.findOne({
       applicationId,
       isDeleted: false,
     });
-
     if (!existingApplication) {
       return sendError(res, {
         message: "Application not found",
@@ -184,7 +329,6 @@ export const updateJobApplication = async (req, res) => {
       coverLetter: req.body.coverLetter ?? existingApplication.coverLetter,
       source: req.body.source ?? existingApplication.source,
     };
-
     /* ---------- VALIDATION ---------- */
     const { value, error } = submitJobApplicationValidator.validate(mergedData, {
       abortEarly: false,
@@ -198,7 +342,6 @@ export const updateJobApplication = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
-
     /* ---------- UPLOAD RESUME IF PROVIDED ---------- */
     let resumeUrl = existingApplication.resume;
     if (req.files?.resume?.length) {
@@ -214,7 +357,6 @@ export const updateJobApplication = async (req, res) => {
       }
       resumeUrl = resumeUploaded.url;
     }
-
     /* ---------- UPLOAD ADDITIONAL FILES IF PROVIDED ---------- */
     let additionalFiles = existingApplication.additionalFiles || [];
 
@@ -224,10 +366,8 @@ export const updateJobApplication = async (req, res) => {
         "careers/additional-files",
         uploadedKeys
       );
-
       additionalFiles = [...additionalFiles, ...additionalUploads];
     }
-
     /* ---------- UPDATE APPLICATION ---------- */
     const application = await updateJobApplicationService({
       applicationId,
@@ -235,7 +375,6 @@ export const updateJobApplication = async (req, res) => {
       resumeFile: resumeUrl,
       additionalFiles,
     });
-
     return sendSuccess(
       res,
       {
@@ -248,11 +387,56 @@ export const updateJobApplication = async (req, res) => {
     if (uploadedKeys.length) {
       await Promise.all(uploadedKeys.map((key) => deleteFromS3(key)));
     }
-
     return handleError(res, error);
   }
 };
 
+/**
+ * @function getManageApplications
+ *
+ * @description
+ * Fetch paginated job applications for the manage/admin system.
+ * Supports filtering by jobId, application status, applicant search, and source.
+ *
+ * @params
+ * query: {
+ *   page?: number,
+ *   limit?: number,
+ *   jobId?: string,
+ *   status?: "pending" | "reviewed" | "shortlisted" | "rejected" | "hired" | "all",
+ *   search?: string,          // applicant name, email, or phone
+ *   source?: "career_page" | "linkedin" | "naukri" | "referral" | "manual" | "other"
+ * }
+ *
+ * @process
+ * 1. Parse pagination parameters using getPagination(req.query)
+ * 2. Extract filters (jobId, status, search, source) from query
+ * 3. Call getApplicationsService with pagination and filters
+ * 4. Calculate pagination metadata
+ * 5. Return paginated list of applications
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Applications fetched successfully",
+ *   data: {
+ *     pagination: {
+ *       totalItems: number,
+ *       totalPages: number,
+ *       currentPage: number,
+ *       nextPage: number | null,
+ *       prevPage: number | null,
+ *       limit: number
+ *     },
+ *     applications: []
+ *   }
+ * }
+ *
+ * 500 {
+ *   success: false,
+ *   message: "Internal server error"
+ * }
+ */
 export const getManageApplications = async (req, res) => {
   try {
     const pagination = getPagination(req.query);
@@ -299,6 +483,42 @@ export const getManageApplications = async (req, res) => {
   }
 };
 
+/**
+ * @function getApplicationById
+ *
+ * @description
+ * Fetch a single job application by its applicationId.
+ * Used in the manage/admin system to view detailed information
+ * about a specific candidate's application.
+ *
+ * @params
+ * params: {
+ *   applicationId: string
+ * }
+ *
+ * @process
+ * 1. Extract applicationId from request parameters
+ * 2. Call getApplicationByIdService to fetch application data
+ * 3. Return application details if found
+ * 4. Handle error if application is not found
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Application fetched successfully",
+ *   data: application
+ * }
+ *
+ * 404 {
+ *   success: false,
+ *   message: "Application not found"
+ * }
+ *
+ * 500 {
+ *   success: false,
+ *   message: "Internal server error"
+ * }
+ */
 export const getApplicationById = async (req, res) => {
   try {
     const application = await getApplicationByIdService({
@@ -316,12 +536,64 @@ export const getApplicationById = async (req, res) => {
   }
 };
 
+/**
+ * @function updateApplicationStatus
+ *
+ * @description
+ * Update the status of a job application from the manage/admin system.
+ * Also records a permission audit log for tracking status changes.
+ *
+ * @params
+ * headers: {
+ *   authorization: "Bearer <access_token>"
+ * }
+ *
+ * params: {
+ *   applicationId: string
+ * }
+ *
+ * body: {
+ *   status: "pending" | "reviewed" | "shortlisted" | "rejected" | "hired",
+ *   note?: string,
+ *   permission?: string
+ * }
+ *
+ * @process
+ * 1. Validate request body using updateApplicationStatusValidator
+ * 2. Return validation error if validation fails
+ * 3. Fetch logged-in employee using req.user.email
+ * 4. Return error if employee does not exist
+ * 5. Call updateApplicationStatusService to update application status
+ * 6. Create permission audit log for the status update
+ * 7. Return updated application in success response
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Application status updated successfully",
+ *   data: application
+ * }
+ *
+ * 400 {
+ *   success: false,
+ *   message: "Validation failed"
+ * }
+ *
+ * 404 {
+ *   success: false,
+ *   message: "Employee not found"
+ * }
+ *
+ * 500 {
+ *   success: false,
+ *   message: "Internal server error"
+ * }
+ */
 export const updateApplicationStatus = async (req, res) => {
   try {
     const { value, error } = updateApplicationStatusValidator.validate(req.body, {
       abortEarly: false,
     });
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -330,9 +602,7 @@ export const updateApplicationStatus = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
-
     const employee = await Employee.findOne({ email: req.user.email });
-
     if (!employee) {
       return sendError(res, {
         message: "Employee not found",
@@ -347,6 +617,17 @@ export const updateApplicationStatus = async (req, res) => {
       note: value.note,
       employee,
     });
+      /* ---------- AUDIT ---------- */
+        await PermissionAudit.create({
+          permissionAuditId: uuidv6(),
+          actionBy: employee._id,
+          actionByEmail: employee.email,
+          actionFor: application._id,
+          actionForEmail: application.applicant?.email || null,
+          action: `Application status updated to ${application.status}`,
+          permission: value.permission || "career.application.status.update",
+          actionType: "Update",
+        });
 
     return sendSuccess(
       res,

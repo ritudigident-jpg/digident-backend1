@@ -35,6 +35,7 @@ export const updateApplicationStatusValidator = Joi.object({
       "hired"
     )
     .required(),
+    permission: Joi.string().trim().required(),
   note: Joi.string().trim().allow("", null).optional(),
 });
 

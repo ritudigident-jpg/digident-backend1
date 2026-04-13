@@ -33,8 +33,7 @@ export const checkPermission = () => {
       /* =========================
          VALIDATE TOKEN USER
       ========================= */
-      const userEmail = req.user?.email;
-     
+      const userEmail = req.user?.email; 
       /* ---------- RESOLVE PERMISSION ---------- */
       let requiredPermission;
 
@@ -45,7 +44,6 @@ export const checkPermission = () => {
           req.body?.permission ||
           req.query?.permission;
       }
-      console.log("Permission Middleware - Required Permission:", requiredPermission);
      
      // Assuming permission is sent in request body
       if (!userEmail) {

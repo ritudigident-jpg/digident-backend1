@@ -160,7 +160,6 @@ console.log("Grouped description files:----", groupedDesc);
       );
     }
     /* ---------- SAVE PRODUCT ---------- */
-    console.log("Final product data to save:----",body);
     const product = await Product.create(body);
 
     /* ---------- AUDIT ---------- */

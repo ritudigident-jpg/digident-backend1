@@ -101,7 +101,7 @@ router.get(
 router.patch(
   "/manage/applications/:applicationId/status",
   authToken,
-  checkPermission("career.application.update"),
+  checkPermission(),
   updateApplicationStatus
 );
 
@@ -118,7 +118,5 @@ router.patch(
   checkPermission("career.application.assign"),
   assignApplication
 );
-
-
 
 export default router;
