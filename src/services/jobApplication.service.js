@@ -1,5 +1,6 @@
 import Job from "../models/manage/job.model.js";
 import JobApplication from "../models/ecommarace/jobApplication.model.js";
+import { v6 as uuidv6 } from "uuid";
 
 export const submitJobApplicationService = async ({
   data,
@@ -28,6 +29,7 @@ export const submitJobApplicationService = async ({
   const application = await JobApplication.create({
     job: job._id,
     jobId: job.jobId,
+    applicationId:uuidv6(),
     applicant: {
       firstName: data.firstName,
       lastName: data.lastName,

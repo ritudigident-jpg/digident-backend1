@@ -75,16 +75,16 @@ router.delete(
 
 /* ================= MANAGE APPLICATION ROUTES ================= */
 router.get(
-  "/manage/applications",
+  "/manage/applications/:permission",
   authToken,
-  checkPermission("career.application.list"),
+  checkPermission(),
   getManageApplications
 );
 
 router.get(
-  "/manage/applications/:applicationId",
+  "/manage/applications/:applicationId/:permission",
   authToken,
-  checkPermission("career.application.view"),
+  checkPermission(),
   getApplicationById
 );
 
@@ -108,5 +108,7 @@ router.patch(
   checkPermission("career.application.assign"),
   assignApplication
 );
+
+
 
 export default router;

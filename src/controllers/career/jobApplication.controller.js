@@ -17,6 +17,7 @@ import {
 } from "../../services/jobApplication.service.js";
 import { deleteFromS3, uploadToS3 } from "../../services/awsS3.service.js";
 
+
 const uploadFiles = async (files = [], folder, additionalUploads = []) => {
   return Promise.all(
     files.map(async (file) => {
@@ -114,12 +115,19 @@ export const getManageApplications = async (req, res) => {
         source,
       },
     });
+      /* ---------- PAGINATION META ---------- */
+    const totalItems = result.totalApplications;
+    const currentPage = pagination.page;
+    const totalPages = Math.ceil(totalItems / pagination.limit);
 
-    const paginationMeta = getPaginationMeta({
-      totalItems: result.totalApplications,
-      currentPage: pagination.page,
+    const paginationMeta = {
+      totalItems,
+      totalPages,
+      currentPage,
+      nextPage: currentPage < totalPages ? currentPage + 1 : null,
+      prevPage: currentPage > 1 ? currentPage - 1 : null,
       limit: pagination.limit,
-    });
+    };
 
     return sendSuccess(
       res,
