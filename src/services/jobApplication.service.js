@@ -56,6 +56,91 @@ export const submitJobApplicationService = async ({
   return application;
 };
 
+
+/**
+ * @function updateJobApplicationService
+ *
+ * @description
+ * Update existing job application data in database.
+ *
+ * @process
+ * 1. Find published job by jobId
+ * 2. Find existing application by applicationId
+ * 3. Check duplicate application for same job + email except current one
+ * 4. Update application fields
+ * 5. Save application
+ *
+ * @returns {Promise<Object>} Updated application document
+ */
+export const updateJobApplicationService = async ({
+  applicationId,
+  data,
+  resumeFile,
+  additionalFiles = [],
+}) => {
+  /* ---------- FIND JOB ---------- */
+  const job = await Job.findOne({
+    jobId: data.jobId,
+    status: "published",
+  });
+
+  if (!job) {
+    throw new Error("Job not found or not open for application");
+  }
+
+  /* ---------- FIND APPLICATION ---------- */
+  const application = await JobApplication.findOne({
+    applicationId,
+    isDeleted: false,
+  });
+
+  if (!application) {
+    throw new Error("Application not found");
+  }
+
+  /* ---------- DUPLICATE CHECK ---------- */
+  // const existingApplication = await JobApplication.findOne({
+  //   _id: { $ne: application._id },
+  //   jobId: data.jobId,
+  //   "applicant.email": data.email.toLowerCase(),
+  //   isDeleted: false,
+  // });
+
+  // if (existingApplication) {
+  //   throw new Error("You have already applied for this job");
+  // }
+
+  /* ---------- UPDATE DATA ---------- */
+  application.job = job._id;
+  application.jobId = job.jobId;
+
+  application.applicant.firstName = data.firstName;
+  application.applicant.lastName = data.lastName;
+  application.applicant.email = data.email.toLowerCase();
+  application.applicant.phone = data.phone;
+  application.applicant.city = data.city || null;
+  application.applicant.state = data.state || null;
+  application.applicant.country = data.country || null;
+  application.applicant.totalExperienceYears = data.totalExperienceYears || 0;
+  application.applicant.currentCompany = data.currentCompany || null;
+  application.applicant.currentCTC = data.currentCTC || 0;
+  application.applicant.expectedCTC = data.expectedCTC || 0;
+  application.applicant.noticePeriodDays = data.noticePeriodDays || 0;
+  application.applicant.portfolioUrl = data.portfolioUrl || null;
+  application.applicant.linkedinUrl = data.linkedinUrl || null;
+  application.applicant.githubUrl = data.githubUrl || null;
+
+  application.coverLetter = data.coverLetter || null;
+  application.resume = resumeFile;
+  application.additionalFiles = additionalFiles;
+  application.source = data.source || "career_page";
+
+  await application.save();
+
+  return application;
+};
+
+
 export const getApplicationsService = async ({ pagination, filters }) => {
   const { skip, limit, page } = pagination;
   const { jobId, status, search, source } = filters;

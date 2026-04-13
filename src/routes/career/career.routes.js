@@ -19,6 +19,7 @@ import {
   updateApplicationStatus,
   addApplicationNote,
   assignApplication,
+  updateJobApplication,
 } from "../../controllers/career/jobApplication.controller.js";
 import upload from "../../middlewares/multer.middleware.js";
 const router = express.Router();
@@ -27,6 +28,14 @@ const router = express.Router();
 router.get("/jobs", getCareerJobs);
 router.get("/jobs/:slug", getJobBySlug);
 router.get("/jobs/id/:jobId", getJobById);
+router.put(
+  "/application/:applicationId",
+  upload.fields([
+    { name: "resume", maxCount: 1 },
+    { name: "additionalFiles", maxCount: 10 },
+  ]),
+  updateJobApplication
+);
 
 router.post(
   "/apply",
@@ -51,6 +60,7 @@ router.get(
   checkPermission(),
   getManageJobs
 );
+
 
 router.get(
   "/manage/jobs/:jobId/:permission",
