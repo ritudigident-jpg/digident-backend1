@@ -28,6 +28,7 @@ const router = express.Router();
 router.get("/jobs", getCareerJobs);
 router.get("/jobs/:slug", getJobBySlug);
 router.get("/jobs/id/:jobId", getJobById);
+router.get("/application/:applicationId", getApplicationById);
 router.put(
   "/application/:applicationId",
   upload.fields([
