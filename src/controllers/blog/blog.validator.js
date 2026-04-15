@@ -44,3 +44,15 @@ export const updateBlogValidator = Joi.object({
   permission: Joi.string().trim().required(),
   removeBannerImage: Joi.boolean().optional(),
 });
+
+
+/* ---------- ADD BLOG COMMENT VALIDATOR ---------- */
+export const addBlogCommentValidator = Joi.object({
+  name: Joi.string().trim().max(100).required(),
+
+  company: Joi.string().trim().max(150).allow("").optional(),
+
+  city: Joi.string().trim().max(100).allow("").optional(),
+
+  review: Joi.string().trim().max(2000).required(),
+});

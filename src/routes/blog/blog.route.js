@@ -9,6 +9,7 @@ import {
   updateBlog,
   deleteBlog
 } from "../../controllers/blog/blog.controller.js";
+import { addBlogComment, deleteBlogComment, increaseBlogView } from "../../controllers/blog/blogView.controller.js";
 
 const router = express.Router();
 
@@ -35,11 +36,19 @@ router.put(
 );
 
 /* ---------- GET ALL BLOGS ---------- */
-router.get("/get/:permission", auth, checkPermission(), getBlogs);
+router.get("/manage/get/:permission", auth, checkPermission(), getBlogs);
+router.get("/", getBlogs);
+router.get("/:blogId", getBlogById);
 
 /* ---------- GET BLOG BY ID ---------- */
-router.get("/get/:blogId/:permission", auth, checkPermission(), getBlogById);
+router.get("/manage/get/:blogId/:permission", auth, checkPermission(), getBlogById);
 
-router.delete("/delete/:blogId", auth, checkPermission(),deleteBlog);
+router.delete("/manage/delete/:blogId", auth, checkPermission(),deleteBlog);
+
+router.post("/comment/:blogId", addBlogComment);
+
+router.post("/:blogId/view", increaseBlogView);
+
+router.delete("/manage/delete/comment/:blogId/:commentId", auth, checkPermission(), deleteBlogComment);
 
 export default router;

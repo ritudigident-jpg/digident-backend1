@@ -385,6 +385,31 @@ export const getBlogsService = async (query) => {
   };
 };
 
+
+/* ---------- INCREASE BLOG VIEW SERVICE ---------- */
+export const increaseBlogViewService = async ({ blogId }) => {
+  const blog = await Blog.findOne({
+    blogId,
+    status: "published",
+    isDeleted: false,
+  });
+
+  if (!blog) {
+    const err = new Error("Blog not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  blog.stats.views = (blog.stats?.views || 0) + 1;
+  await blog.save();
+
+  return {
+    blogId: blog.blogId,
+    slug: blog.slug,
+    views: blog.stats.views,
+  };
+};
+
 /* ---------- GET BLOG BY ID SERVICE ---------- */
 export const getBlogByIdService = async (blogId) => {
   const blog = await Blog.findOne({
@@ -457,5 +482,100 @@ export const deleteBlogService = async ({ blogId, employee, permission }) => {
   return {
     blogId: blog.blogId,
     title: blog.title,
+  };
+};
+
+
+/* ---------- ADD BLOG COMMENT SERVICE ---------- */
+export const addBlogCommentService = async ({ blogId, data }) => {
+  const blog = await Blog.findOne({
+    blogId,
+    status: "published",
+  });
+
+  if (!blog) {
+    const err = new Error("Blog not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const comment = {
+    name: data.name.trim(),
+    company: data.company?.trim() || "",
+    city: data.city?.trim() || "",
+    review: data.review.trim(),
+  };
+
+  blog.comments.push(comment);
+  blog.stats.commentsCount = (blog.stats.commentsCount || 0) + 1;
+
+  await blog.save();
+
+  return blog.comments[blog.comments.length - 1];
+};
+
+
+/* ---------- DELETE BLOG COMMENT SERVICE ---------- */
+export const deleteBlogCommentService = async ({
+  blogId,
+  commentId,
+  employee,
+  permission,
+}) => {
+  const blog = await Blog.findOne({
+    blogId,
+    isDeleted: false,
+  });
+
+  if (!blog) {
+    const err = new Error("Blog not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const commentIndex = blog.comments.findIndex(
+    (comment) => comment.commentId === commentId
+  );
+
+  if (commentIndex === -1) {
+    const err = new Error("Comment not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const deletedComment = blog.comments[commentIndex];
+
+  /* ---------- REMOVE COMMENT ---------- */
+  blog.comments.splice(commentIndex, 1);
+
+  /* ---------- UPDATE COMMENT COUNT ---------- */
+  blog.stats.commentsCount = Math.max(
+    0,
+    (blog.stats.commentsCount || 0) - 1
+  );
+
+  await blog.save();
+
+  /* ---------- AUDIT ---------- */
+  await PermissionAudit.create({
+    permissionAuditId: uuidv6(),
+    actionBy: employee._id,
+    actionByEmail: employee.email,
+    actionFor: blog._id,
+    action: `${blog.title} - ${deletedComment.name}`,
+    permission,
+    actionType: "Delete Comment",
+  });
+
+  return {
+    blogId: blog.blogId,
+    commentId: deletedComment.commentId,
+    deletedComment: {
+      name: deletedComment.name,
+      company: deletedComment.company,
+      city: deletedComment.city,
+      review: deletedComment.review,
+    },
+    commentsCount: blog.stats.commentsCount,
   };
 };
