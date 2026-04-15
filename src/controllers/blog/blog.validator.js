@@ -19,14 +19,6 @@ const contentBlockValidator = Joi.object({
   order: Joi.number().integer().min(0).optional(),
 });
 
-/* ---------- SEO VALIDATOR ---------- */
-const seoValidator = Joi.object({
-  metaTitle: Joi.string().trim().allow("").optional(),
-  metaDescription: Joi.string().trim().allow("").optional(),
-  keywords: Joi.array().items(Joi.string().trim()).optional(),
-  canonicalUrl: Joi.string().trim().allow("").optional(),
-  ogImage: Joi.string().trim().allow("").optional(),
-});
 
 /* ---------- CREATE BLOG VALIDATOR ---------- */
 export const createBlogValidator = Joi.object({
@@ -37,7 +29,6 @@ export const createBlogValidator = Joi.object({
   tags: Joi.array().items(Joi.string().trim().lowercase()).optional(),
   status: Joi.string().valid("draft", "published", "archived").optional(),
   featured: Joi.boolean().optional(),
-  seo: seoValidator.optional(),
   permission: Joi.string().trim().required(),
 });
 
@@ -50,7 +41,6 @@ export const updateBlogValidator = Joi.object({
   tags: Joi.array().items(Joi.string().trim().lowercase()).optional(),
   status: Joi.string().valid("draft", "published", "archived").optional(),
   featured: Joi.boolean().optional(),
-  seo: seoValidator.optional(),
   permission: Joi.string().trim().required(),
   removeBannerImage: Joi.boolean().optional(),
 });

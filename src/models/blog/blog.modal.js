@@ -89,18 +89,6 @@ const blogCommentSchema = new Schema(
   { _id: false }
 );
 
-/* ---------- SEO SCHEMA ---------- */
-const seoSchema = new Schema(
-  {
-    metaTitle: { type: String, trim: true, default: "" },
-    metaDescription: { type: String, trim: true, default: "" },
-    keywords: [{ type: String, trim: true }],
-    canonicalUrl: { type: String, trim: true, default: "" },
-    ogImage: { type: String, trim: true, default: "" },
-  },
-  { _id: false }
-);
-
 /* ---------- BLOG SCHEMA ---------- */
 const blogSchema = new Schema(
   {
@@ -150,10 +138,6 @@ const blogSchema = new Schema(
       type: Boolean,
       default: false,
       index: true,
-    },
-    seo: {
-      type: seoSchema,
-      default: () => ({}),
     },
     comments: [blogCommentSchema],
     stats: {

@@ -39,7 +39,6 @@ export const createBlog = async (req, res) => {
       ...req.body,
       content: parseJsonField(req.body.content, []),
       tags: parseJsonField(req.body.tags, []),
-      seo: parseJsonField(req.body.seo, {}),
       featured:
         req.body.featured === undefined
           ? undefined
@@ -94,7 +93,6 @@ export const updateBlog = async (req, res) => {
       ...req.body,
       content: parseJsonField(req.body.content, undefined),
       tags: parseJsonField(req.body.tags, undefined),
-      seo: parseJsonField(req.body.seo, undefined),
       featured:
         req.body.featured === undefined
           ? undefined
@@ -105,12 +103,10 @@ export const updateBlog = async (req, res) => {
           : req.body.removeBannerImage === "true" ||
             req.body.removeBannerImage === true,
     };
-
     const { value, error } = updateBlogValidator.validate(body, {
       abortEarly: false,
       stripUnknown: true,
     });
-
     if (error) {
       return sendError(res, {
         message: "Validation failed",
@@ -128,14 +124,13 @@ export const updateBlog = async (req, res) => {
         errorCode: "EMPLOYEE_NOT_FOUND",
       });
     }
-
+    
     const result = await updateBlogService({
       blogId: req.params.blogId,
       data: value,
       files: req.files || {},
       employee,
     });
-
     return sendSuccess(res, result, 200, "Blog updated successfully");
   } catch (error) {
     console.error("Update Blog Error:", error);

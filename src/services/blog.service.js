@@ -126,7 +126,6 @@ export const createBlogService = async ({ data, files, employee }) => {
       tags = [],
       status = "draft",
       featured = false,
-      seo = {},
       permission,
     } = data;
 
@@ -164,15 +163,6 @@ export const createBlogService = async ({ data, files, employee }) => {
       tags: normalizeTags(tags),
       status,
       featured,
-      seo: {
-        metaTitle: seo?.metaTitle || "",
-        metaDescription: seo?.metaDescription || "",
-        keywords: Array.isArray(seo?.keywords)
-          ? seo.keywords.map((item) => item.trim()).filter(Boolean)
-          : [],
-        canonicalUrl: seo?.canonicalUrl || "",
-        ogImage: seo?.ogImage || "",
-      },
       readingTime: calculateReadingTime(finalContent),
       publishedAt: status === "published" ? new Date() : null,
     });
@@ -199,7 +189,6 @@ export const createBlogService = async ({ data, files, employee }) => {
 export const updateBlogService = async ({ blogId, data, files, employee }) => {
   const uploadedKeys = [];
   const oldKeysToDelete = [];
-
   try {
     const blog = await Blog.findOne({ blogId, isDeleted: false });
     if (!blog) {
@@ -207,7 +196,6 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
       err.statusCode = 404;
       throw err;
     }
-
     const {
       title,
       slug,
@@ -216,7 +204,6 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
       tags,
       status,
       featured,
-      seo,
       permission,
       removeBannerImage = false,
     } = data;
@@ -279,18 +266,6 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
     if (tags !== undefined) blog.tags = normalizeTags(tags);
     if (featured !== undefined) blog.featured = featured;
 
-    if (seo !== undefined) {
-      blog.seo = {
-        metaTitle: seo?.metaTitle || "",
-        metaDescription: seo?.metaDescription || "",
-        keywords: Array.isArray(seo?.keywords)
-          ? seo.keywords.map((item) => item.trim()).filter(Boolean)
-          : [],
-        canonicalUrl: seo?.canonicalUrl || "",
-        ogImage: seo?.ogImage || "",
-      };
-    }
-
     if (status !== undefined) {
       blog.status = status;
 
@@ -302,7 +277,6 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
         blog.publishedAt = null;
       }
     }
-
     await blog.save();
 
     /* ---------- AUDIT ---------- */
@@ -318,7 +292,6 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
 
     /* ---------- DELETE OLD IMAGES AFTER SUCCESS ---------- */
     await cleanupS3Keys(oldKeysToDelete);
-
     return blog;
   } catch (error) {
     await cleanupS3Keys(uploadedKeys);
