@@ -178,12 +178,13 @@ export const getJobBySlugService = async ({ slug }) => {
   return job;
 };
 
-export const deleteJobService = async ({jobId }) => {
-  const job = await Job.findOneAndDelete({ jobId });
+export const deleteJobService = async ({ jobId }) => {
+  const job = await Job.findOne({ jobId });
 
   if (!job) {
     throw new Error("Job not found");
   }
+  await job.deleteOne();
 
   return job;
 };

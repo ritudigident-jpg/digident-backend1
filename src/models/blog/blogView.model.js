@@ -14,20 +14,17 @@ const blogViewSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Blog",
       required: true,
-      index: true,
     },
     slug: {
       type: String,
       required: true,
       trim: true,
       lowercase: true,
-      index: true,
     },
     ipAddress: {
       type: String,
       trim: true,
       default: "",
-      index: true,
     },
     userAgent: {
       type: String,
@@ -42,20 +39,16 @@ const blogViewSchema = new Schema(
     viewedAt: {
       type: Date,
       default: Date.now,
-      index: true,
     },
     viewDate: {
       type: String,
       default: () => new Date().toISOString().slice(0, 10), // YYYY-MM-DD
-      index: true,
     },
   },
   {
     timestamps: true,
   }
 );
-
-blogViewSchema.index({ blog: 1, ipAddress: 1, viewDate: 1 });
 
 const BlogView = model("BlogView", blogViewSchema);
 export default BlogView;

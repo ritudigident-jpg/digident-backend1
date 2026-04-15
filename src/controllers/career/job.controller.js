@@ -578,7 +578,18 @@ export const getJobBySlug = async (req, res) => {
  */
 export const deleteJob = async (req, res) => {
   try {
-    await deleteJobService({
+    /* ---------- FETCH EMPLOYEE ---------- */
+    const employee = await Employee.findOne({ email: req.user.email });
+
+    if (!employee) {
+      return sendError(res, {
+        message: "Employee not found",
+        statusCode: 404,
+        errorCode: "EMPLOYEE_NOT_FOUND",
+      });
+    }
+    /* ---------- DELETE JOB ---------- */
+    const job = await deleteJobService({
       jobId: req.params.jobId,
     });
 

@@ -32,9 +32,7 @@ const contentBlockSchema = new Schema(
       },
     ],
     image: {
-      url: { type: String, trim: true, default: "" },
-      key: { type: String, trim: true, default: "" },
-      alt: { type: String, trim: true, default: "" },
+    type:String,
     },
     order: {
       type: Number,
@@ -109,7 +107,6 @@ const blogSchema = new Schema(
     blogId: {
       type: String,
       unique: true,
-      index: true,
       default: () => uuidv6(),
     },
     title: {
@@ -133,9 +130,7 @@ const blogSchema = new Schema(
       maxlength: 500,
     },
     bannerImage: {
-      url: { type: String, trim: true, default: "" },
-      key: { type: String, trim: true, default: "" },
-      alt: { type: String, trim: true, default: "" },
+      type: String,
     },
     content: [contentBlockSchema],
     tags: [
@@ -193,11 +188,10 @@ blogSchema.index({
 });
 
 /* ---------- PRE-VALIDATE SLUG ---------- */
-blogSchema.pre("validate", function (next) {
+blogSchema.pre("validate", function () {
   if (this.title && !this.slug) {
     this.slug = slugify(this.title, { lower: true, strict: true, trim: true });
   }
-  next();
 });
 
 const Blog = model("Blog", blogSchema);
