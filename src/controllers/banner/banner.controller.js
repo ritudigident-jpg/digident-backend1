@@ -113,7 +113,7 @@ export const createBanner = async (req, res) => {
 export const getProductsByBanner = async (req, res) => {
   try {
     const { bannerId } = req.params;
-    if (!bannerId) {
+    if (!bannerId){
       return sendError(res, {
         message: "BannerId is required",
         statusCode: 400,

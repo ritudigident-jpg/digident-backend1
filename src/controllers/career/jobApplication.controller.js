@@ -158,7 +158,7 @@ export const submitJobApplication = async (req, res) => {
       additionalFiles: additionalUploads,
     });
      /* ---------- SEND EMAIL ---------- */
-    const updateUrl = `http://localhost:5174/career/application/${application.applicationId}`;
+    const updateUrl = `${process.env.FRONTEND_URL}/career/application/${application.applicationId}`;
 
     const htmlBody = applicationSubmittedTemplate({
       candidateName: `${value.firstName} ${value.lastName}`.trim(),

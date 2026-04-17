@@ -64,6 +64,8 @@ const allowedOrigins = [
   "https://manage-beta.netlify.app",
   "https://digident-ecommerce-beta.netlify.app",
   "https://library.digident.in",
+  "https://adminfrontend00.netlify.app",
+  "https://frontendmaindigi.netlify.app",
   process.env.CLIENT_URL,
 ].filter(Boolean);
 

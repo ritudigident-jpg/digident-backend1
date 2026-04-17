@@ -1,15 +1,6 @@
 import Employee from "../../models/manage/employee.model.js";
-import {
-  createBlogValidator,
-  updateBlogValidator,
-} from "./blog.validator.js";
-import {
-  createBlogService,
-  deleteBlogService,
-  getBlogByIdService,
-  getBlogsService,
-  updateBlogService,
-} from "../../services/blog.service.js";
+import { createBlogValidator, updateBlogValidator } from "./blog.validator.js";
+import { createBlogService, deleteBlogService, getBlogByIdService, getBlogsService, updateBlogService} from "../../services/blog.service.js";
 import {
   sendError,
   handleError,
@@ -27,12 +18,7 @@ const parseJsonField = (value, fallback) => {
   }
 };
 
-/**
- * @function createBlog
- *
- * @description
- * Create blog with banner image + content images upload to S3
- */
+
 export const createBlog = async (req, res) => {
   try {
     const body = {
@@ -44,13 +30,11 @@ export const createBlog = async (req, res) => {
           ? undefined
           : req.body.featured === "true" || req.body.featured === true,
     };
-
     const { value, error } = createBlogValidator.validate(body, {
       abortEarly: false,
       stripUnknown: true,
     });
-
-    if (error) {
+    if (error){
       return sendError(res, {
         message: "Validation failed",
         statusCode: 400,
@@ -58,7 +42,6 @@ export const createBlog = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
-
     const employee = await Employee.findOne({ email: req.user.email });
     if (!employee) {
       return sendError(res, {
@@ -67,7 +50,6 @@ export const createBlog = async (req, res) => {
         errorCode: "EMPLOYEE_NOT_FOUND",
       });
     }
-
     const result = await createBlogService({
       data: value,
       files: req.files || {},
@@ -154,7 +136,6 @@ export const updateBlog = async (req, res) => {
 export const getBlogs = async (req, res) => {
   try {
     const result = await getBlogsService(req.query);
-
     return sendSuccess(res, result, 200, "Blogs fetched successfully");
   } catch (error) {
     console.error("Get Blogs Error:", error);
@@ -178,9 +159,7 @@ export const getBlogs = async (req, res) => {
 export const getBlogById = async (req, res) => {
   try {
     const { blogId } = req.params;
-
     const result = await getBlogByIdService(blogId);
-
     return sendSuccess(res, result, 200, "Blog fetched successfully");
   } catch (error) {
     console.error("Get Blog By Id Error:", error);
@@ -232,7 +211,7 @@ export const deleteBlog = async (req, res) => {
       permission,
     });
     return sendSuccess(res, result, 200, "Blog deleted successfully");
-  } catch (error) {
+  }catch (error) {
     console.error("Delete Blog Error:", error);
     return handleError(res, error);
   }

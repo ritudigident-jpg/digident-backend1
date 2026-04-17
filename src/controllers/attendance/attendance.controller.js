@@ -1309,9 +1309,7 @@ export const cancelLeaveRequest = async (req, res) => {
 export const getMyAttendanceStats = async (req, res) => {
   try {
     const { month, year } = req.query;
-
     const result = await getMyAttendanceStatsService(req.user, month, year);
-
     return sendSuccess(
       res,
       {
@@ -1319,7 +1317,6 @@ export const getMyAttendanceStats = async (req, res) => {
         absentDays: result.stats.absentDays,
         halfDays: result.stats.halfDays,
         lateDays: result.stats.lateDays,
-
         leaveDays: Number(result.stats.leaveDays.toFixed(1)),
         leaveSummary: {
           FULL_DAY: Number(result.stats.leaveSummary.FULL_DAY.toFixed(1)),
