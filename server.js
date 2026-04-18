@@ -37,6 +37,8 @@ import { startCouponExpiryCron } from "./src/config/cron/couponExpiryCron.js";
 import Attendance from "./src/routes/manage/attendance.routes.js";
 import careerRoutes from "./src/routes/career/career.routes.js";
 import blogRoutes from "./src/routes/blog/blog.route.js";
+import invoiceRoutes from "./src/routes/manage/invoice.route.js"
+import productReviewRoutes from "./src/routes/manage/productReview.routes.js"
 
 
 
@@ -66,6 +68,7 @@ const allowedOrigins = [
   "https://library.digident.in",
   "https://adminfrontend00.netlify.app",
   "https://frontendmaindigi.netlify.app",
+  "https://ecommercedigi.netlify.app",
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
@@ -159,6 +162,8 @@ app.use("/api/v1/aws", awsUploadRoutes);
 app.use("/api/v1/attendance", Attendance);
 app.use("/api/v1/career", careerRoutes);
 app.use("/api/v1/blog",blogRoutes);
+app.use("/api/v1/invoice",invoiceRoutes)
+app.use("/api/v1/product-review", productReviewRoutes);
 /* -------------------------------
    START SERVER
 -------------------------------- */
