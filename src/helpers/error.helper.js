@@ -22,7 +22,6 @@ export const sendError = (
   if (details) {
     response.error.details = details;
   }
-
   return res.status(statusCode).json(response);
 };
 

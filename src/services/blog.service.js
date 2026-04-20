@@ -4,6 +4,8 @@ import { v6 as uuidv6 } from "uuid";
 import Blog from "../models/blog/blog.modal.js";
 import {PermissionAudit} from "../models/manage/permissionaudit.model.js";
 import { uploadToS3, deleteFromS3 } from "./awsS3.service.js";
+import {generateSEOContent} from "../helpers/blogSeo.helper.js"
+
 
 /* ---------- CALCULATE READING TIME ---------- */
 const calculateReadingTime = (content = []) => {
