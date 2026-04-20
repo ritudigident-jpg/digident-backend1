@@ -29,7 +29,7 @@ export const createInvoiceService = async (data) => {
     customerNo: numbers.customerNo,
     orderNumber: numbers.orderNumber,
     invoiceDate,
-    dueDate,
+    dueDate:data.dueDate,
     orderDate: data.orderDate || invoiceDate,
     deliveryDate: data.deliveryDate || invoiceDate,
     paymentTerms,
