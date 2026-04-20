@@ -57,7 +57,6 @@ export const submitJobApplicationService = async ({
   return application;
 };
 
-
 /**
  * @function updateJobApplicationService
  *
@@ -140,7 +139,6 @@ export const updateJobApplicationService = async ({
 
   return application;
 };
-
 
 export const getApplicationsService = async ({ pagination, filters }) => {
   const { skip, limit, page } = pagination;

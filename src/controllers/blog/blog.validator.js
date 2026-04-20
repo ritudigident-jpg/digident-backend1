@@ -19,14 +19,13 @@ const contentBlockValidator = Joi.object({
   order: Joi.number().integer().min(0).optional(),
 });
 
-
 /* ---------- CREATE BLOG VALIDATOR ---------- */
 export const createBlogValidator = Joi.object({
   title: Joi.string().trim().max(200).required(),
-  slug: Joi.string().trim().lowercase().optional(),
+  slug: Joi.string().trim().allow("").optional(),
   shortDescription: Joi.string().trim().max(500).required(),
   content: Joi.array().items(contentBlockValidator).min(1).required(),
-  tags: Joi.array().items(Joi.string().trim().lowercase()).optional(),
+  tags: Joi.array().items(Joi.string().trim()).optional(),
   status: Joi.string().valid("draft", "published", "archived").optional(),
   featured: Joi.boolean().optional(),
   permission: Joi.string().trim().required(),

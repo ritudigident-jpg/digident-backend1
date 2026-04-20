@@ -4,6 +4,31 @@ import { v6 as uuidv6 } from "uuid";
 
 const { Schema, model } = mongoose;
 
+/* ---------- SEO SCHEMA ---------- */
+const seoSchema = new Schema(
+  {
+    metaTitle: { type: String, trim: true, default: "" },
+    metaDescription: { type: String, trim: true, default: "" },
+    keywords: [{ type: String, trim: true }],
+    canonicalUrl: { type: String, trim: true, default: "" },
+    ogImage: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+/* ---------- SEO ANALYSIS SCHEMA ---------- */
+const seoAnalysisSchema = new Schema(
+  {
+    primaryKeyword: { type: String, trim: true, default: "" },
+    secondaryKeywords: [{ type: String, trim: true }],
+    searchIntent: {
+      type: String,
+      enum: ["informational", "commercial", "transactional", "navigational"],
+      default: "informational",
+    },
+    seoScore: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
 /* ---------- CONTENT BLOCK SCHEMA ---------- */
 const contentBlockSchema = new Schema(
   {
@@ -138,6 +163,14 @@ const blogSchema = new Schema(
       type: Boolean,
       default: false,
       index: true,
+    },
+      seo: {
+      type: seoSchema,
+      default: () => ({}),
+    },
+      seoAnalysis: {
+      type: seoAnalysisSchema,
+      default: () => ({}),
     },
     comments: [blogCommentSchema],
     stats: {

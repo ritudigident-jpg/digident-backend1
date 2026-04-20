@@ -18,7 +18,6 @@ const parseJsonField = (value, fallback) => {
   }
 };
 
-
 export const createBlog = async (req, res) => {
   try {
     const body = {
@@ -30,11 +29,13 @@ export const createBlog = async (req, res) => {
           ? undefined
           : req.body.featured === "true" || req.body.featured === true,
     };
+
     const { value, error } = createBlogValidator.validate(body, {
       abortEarly: false,
       stripUnknown: true,
     });
-    if (error){
+
+    if (error) {
       return sendError(res, {
         message: "Validation failed",
         statusCode: 400,
@@ -42,7 +43,9 @@ export const createBlog = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
+
     const employee = await Employee.findOne({ email: req.user.email });
+
     if (!employee) {
       return sendError(res, {
         message: "Employee not found",
@@ -50,6 +53,7 @@ export const createBlog = async (req, res) => {
         errorCode: "EMPLOYEE_NOT_FOUND",
       });
     }
+
     const result = await createBlogService({
       data: value,
       files: req.files || {},
@@ -75,6 +79,7 @@ export const updateBlog = async (req, res) => {
       ...req.body,
       content: parseJsonField(req.body.content, undefined),
       tags: parseJsonField(req.body.tags, undefined),
+      seo: parseJsonField(req.body.seo, undefined),
       featured:
         req.body.featured === undefined
           ? undefined
@@ -106,7 +111,6 @@ export const updateBlog = async (req, res) => {
         errorCode: "EMPLOYEE_NOT_FOUND",
       });
     }
-    
     const result = await updateBlogService({
       blogId: req.params.blogId,
       data: value,
@@ -193,11 +197,9 @@ export const deleteBlog = async (req, res) => {
         errorCode: "VALIDATION_ERROR",
       });
     }
-
     const employee = await Employee.findOne({
       email: req.user.email,
     });
-
     if (!employee) {
       return sendError(res, {
         message: "Employee not found",

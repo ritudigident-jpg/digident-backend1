@@ -19,7 +19,6 @@ export const createInvoiceValidator = Joi.object({
   customerServiceRep: Joi.string().trim().allow("").optional(),
   orderDate: Joi.date().allow(null).optional(),
   deliveryDate: Joi.date().allow(null).optional(),
-
   billTo: Joi.object({
     companyName: Joi.string().trim().required(),
     address: Joi.string().trim().allow("").optional(),
@@ -27,7 +26,6 @@ export const createInvoiceValidator = Joi.object({
     contactPerson: Joi.string().trim().allow("").optional(),
     contactNumber: Joi.string().trim().allow("").optional(),
   }).required(),
-
   seller: Joi.object({
     companyName: Joi.string().trim().allow("").optional(),
     address: Joi.string().trim().allow("").optional(),

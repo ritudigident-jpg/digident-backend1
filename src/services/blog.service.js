@@ -116,7 +116,6 @@ const buildContentWithUploads = async ({
 /* ---------- CREATE BLOG SERVICE ---------- */
 export const createBlogService = async ({ data, files, employee }) => {
   const uploadedKeys = [];
-
   try {
     const {
       title,
@@ -129,40 +128,66 @@ export const createBlogService = async ({ data, files, employee }) => {
       permission,
     } = data;
 
-    const exist = await Blog.findOne({ title: title.trim(), isDeleted: false });
+    const trimmedTitle = title.trim();
+    const trimmedShortDescription = shortDescription.trim();
+    const normalizedTags = normalizeTags(tags);
+
+    const exist = await Blog.findOne({
+      title: trimmedTitle,
+      isDeleted: false,
+    });
+
     if (exist) {
       const err = new Error("Blog already exists with this title");
       err.statusCode = 409;
+      err.errorCode = "BLOG_ALREADY_EXISTS";
       throw err;
     }
 
-    const finalSlug = await generateUniqueSlug(title, slug);
+    const finalSlug = await generateUniqueSlug(trimmedTitle, slug);
 
     /* ---------- UPLOAD BANNER IMAGE ---------- */
     let bannerImage = "";
     if (files?.bannerImage?.[0]) {
-      const uploadedBanner = await uploadToS3(files.bannerImage[0], "blog/banner");
+      const uploadedBanner = await uploadToS3(
+        files.bannerImage[0],
+        "blog/banner"
+      );
       bannerImage = uploadedBanner.url;
       if (uploadedBanner.key) uploadedKeys.push(uploadedBanner.key);
     }
 
-    /* ---------- UPLOAD CONTENT IMAGES ---------- */
+    /* ---------- BUILD CONTENT WITH CONTENT IMAGE UPLOADS ---------- */
     const finalContent = await buildContentWithUploads({
       content,
       uploadedKeys,
       contentImageFiles: files?.contentImages || [],
     });
 
+    /* ---------- AUTO GENERATE SEO ---------- */
+    const { seo, seoAnalysis } = generateSEOContent({
+      title: trimmedTitle,
+      shortDescription: trimmedShortDescription,
+      content: finalContent,
+      tags: normalizedTags,
+      slug: finalSlug,
+      bannerImage,
+      baseUrl: process.env.FRONTEND_URL || process.env.WEBSITE_URL || "",
+      brandName: process.env.BRAND_NAME || "",
+    });
+
     /* ---------- CREATE BLOG ---------- */
     const blog = await Blog.create({
-      title: title.trim(),
+      title: trimmedTitle,
       slug: finalSlug,
-      shortDescription: shortDescription.trim(),
+      shortDescription: trimmedShortDescription,
       bannerImage,
       content: finalContent,
-      tags: normalizeTags(tags),
+      tags: normalizedTags,
       status,
       featured,
+      seo,
+      seoAnalysis,
       readingTime: calculateReadingTime(finalContent),
       publishedAt: status === "published" ? new Date() : null,
     });
@@ -204,6 +229,7 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
       tags,
       status,
       featured,
+      seo,
       permission,
       removeBannerImage = false,
     } = data;
@@ -222,19 +248,16 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
     if (shortDescription !== undefined) {
       blog.shortDescription = shortDescription.trim();
     }
-
     /* ---------- BANNER IMAGE ---------- */
     if (removeBannerImage && blog.bannerImage) {
       oldKeysToDelete.push(blog.bannerImage);
       blog.bannerImage = "";
     }
-
     if (files?.bannerImage?.[0]) {
       const uploadedBanner = await uploadToS3(files.bannerImage[0], "blog/banner");
       blog.bannerImage = uploadedBanner.url;
       if (uploadedBanner.key) uploadedKeys.push(uploadedBanner.key);
     }
-
     /* ---------- CONTENT ---------- */
     if (content !== undefined) {
       const oldContentImages = (blog.content || [])
@@ -248,24 +271,30 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
         oldContent: blog.content || [],
         isUpdate: true,
       });
-
       blog.content = finalContent;
-
       const newContentImages = finalContent.map((item) => item.image).filter(Boolean);
-
       for (const oldImage of oldContentImages) {
         if (!newContentImages.includes(oldImage)) {
           oldKeysToDelete.push(oldImage);
         }
       }
-
       blog.readingTime = calculateReadingTime(finalContent);
     }
 
     /* ---------- OTHER FIELDS ---------- */
     if (tags !== undefined) blog.tags = normalizeTags(tags);
     if (featured !== undefined) blog.featured = featured;
-
+    if (seo !== undefined){
+      blog.seo = {
+        metaTitle: seo?.metaTitle || "",
+        metaDescription: seo?.metaDescription || "",
+        keywords: Array.isArray(seo?.keywords)
+          ? seo.keywords.map((item) => item.trim()).filter(Boolean)
+          : [],
+        canonicalUrl: seo?.canonicalUrl || "",
+        ogImage: seo?.ogImage || "",
+      };
+    }
     if (status !== undefined) {
       blog.status = status;
 
@@ -299,13 +328,11 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
   }
 };
 
-
 /* ---------- GET BLOGS SERVICE ---------- */
 export const getBlogsService = async (query) => {
   const page = Math.max(parseInt(query.page) || 1, 1);
   const limit = Math.min(Math.max(parseInt(query.limit) || 10, 1), 100);
   const skip = (page - 1) * limit;
-
   const {
     search,
     status,
@@ -319,7 +346,7 @@ export const getBlogsService = async (query) => {
   };
 
   /* ---------- SEARCH FILTER ---------- */
-  if (search?.trim()) {
+  if (search?.trim()){
     filter.$or = [
       { title: { $regex: search.trim(), $options: "i" } },
       { shortDescription: { $regex: search.trim(), $options: "i" } },
@@ -368,7 +395,6 @@ export const getBlogsService = async (query) => {
       .skip(skip)
       .limit(limit)
       .lean(),
-
     Blog.countDocuments(filter),
   ]);
 
