@@ -1,7 +1,16 @@
 import { createInvoiceValidator } from "./invoice.validator.js";
-import { createInvoiceService, getInvoiceByIdService, getInvoicesService, updateInvoiceService } from "../../services/invoice.service.js";
-import {sendError,handleError} from "../../helpers/error.helper.js";
+import {
+  createInvoiceService,
+  getInvoiceByIdService,
+  getInvoicesService,
+  updateInvoiceService,
+  deleteInvoiceService,
+} from "../../services/invoice.service.js";
+import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
+import Employee from "../../models/manage/employee.model.js";
+import { PermissionAudit } from "../../models/manage/permissionaudit.model.js";
+import { v6 as uuidv6 } from "uuid";
 
 /**
  * @function createInvoice
@@ -30,7 +39,27 @@ export const createInvoice = async (req, res) => {
       });
     }
 
+    const employee = await Employee.findOne({ email: req.user.email });
+    if (!employee) {
+      return sendError(res, {
+        message: "Employee not found",
+        statusCode: 404,
+        errorCode: "EMPLOYEE_NOT_FOUND",
+      });
+    }
+
     const invoice = await createInvoiceService(value);
+
+    await PermissionAudit.create({
+      permissionAuditId: uuidv6(),
+      actionBy: employee._id,
+      actionByEmail: employee.email,
+      actionFor: invoice._id,
+      actionForEmail: null,
+      action: invoice.invoiceNumber,
+      permission: value.permission || "invoice.manage.create",
+      actionType: "Create",
+    });
 
     return sendSuccess(res, invoice, 201, "Invoice created successfully");
   } catch (error) {
@@ -38,7 +67,12 @@ export const createInvoice = async (req, res) => {
   }
 };
 
-
+/**
+ * @function updateInvoice
+ *
+ * @description
+ * Update invoice details by invoiceId.
+ */
 export const updateInvoice = async (req, res) => {
   try {
     const validator = createInvoiceValidator.fork(
@@ -60,12 +94,70 @@ export const updateInvoice = async (req, res) => {
       });
     }
 
+    const employee = await Employee.findOne({ email: req.user.email });
+    if (!employee) {
+      return sendError(res, {
+        message: "Employee not found",
+        statusCode: 404,
+        errorCode: "EMPLOYEE_NOT_FOUND",
+      });
+    }
+
     const invoice = await updateInvoiceService({
       invoiceId: req.params.invoiceId,
       data: value,
     });
 
+    await PermissionAudit.create({
+      permissionAuditId: uuidv6(),
+      actionBy: employee._id,
+      actionByEmail: employee.email,
+      actionFor: invoice._id,
+      actionForEmail: null,
+      action: invoice.invoiceNumber,
+      permission: value.permission || "invoice.manage.update",
+      actionType: "Update",
+    });
+
     return sendSuccess(res, invoice, 200, "Invoice updated successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function deleteInvoice
+ *
+ * @description
+ * Soft delete invoice by invoiceId.
+ */
+export const deleteInvoice = async (req, res) => {
+  try {
+    const employee = await Employee.findOne({ email: req.user.email });
+    if (!employee) {
+      return sendError(res, {
+        message: "Employee not found",
+        statusCode: 404,
+        errorCode: "EMPLOYEE_NOT_FOUND",
+      });
+    }
+
+    const invoice = await deleteInvoiceService({
+      invoiceId: req.params.invoiceId,
+    });
+
+    await PermissionAudit.create({
+      permissionAuditId: uuidv6(),
+      actionBy: employee._id,
+      actionByEmail: employee.email,
+      actionFor: invoice._id,
+      actionForEmail: null,
+      action: invoice.invoiceNumber,
+      permission: req.body.permission || "invoice.manage.delete",
+      actionType: "Delete",
+    });
+
+    return sendSuccess(res, null, 200, "Invoice deleted successfully");
   } catch (error) {
     return handleError(res, error);
   }

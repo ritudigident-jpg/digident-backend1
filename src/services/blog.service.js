@@ -1,11 +1,9 @@
 import slugify from "slugify";
 import { v6 as uuidv6 } from "uuid";
-
 import Blog from "../models/blog/blog.modal.js";
-import {PermissionAudit} from "../models/manage/permissionaudit.model.js";
+import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
 import { uploadToS3, deleteFromS3 } from "./awsS3.service.js";
-import {generateSEOContent} from "../helpers/blogSeo.helper.js"
-
+import { generateSEOContent } from "../helpers/blogSeo.helper.js";
 
 /* ---------- CALCULATE READING TIME ---------- */
 const calculateReadingTime = (content = []) => {
@@ -26,35 +24,10 @@ const calculateReadingTime = (content = []) => {
   return Math.max(1, Math.ceil(totalWords / 200));
 };
 
-/* ---------- GENERATE UNIQUE SLUG ---------- */
-const generateUniqueSlug = async (title, customSlug = "", excludeId = null) => {
-  const baseSlug = slugify(customSlug || title, {
-    lower: true,
-    strict: true,
-    trim: true,
-  });
-
-  let finalSlug = baseSlug;
-  let counter = 1;
-
-  while (true) {
-    const existing = await Blog.findOne({
-      slug: finalSlug,
-      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
-    }).lean();
-
-    if (!existing) break;
-
-    counter += 1;
-    finalSlug = `${baseSlug}-${counter}`;
-  }
-
-  return finalSlug;
-};
-
 /* ---------- NORMALIZE TAGS ---------- */
 const normalizeTags = (tags = []) => {
-  return [...new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
+  if (!Array.isArray(tags)) return [];
+  return [...new Set(tags.map((tag) => String(tag).trim().toLowerCase()).filter(Boolean))];
 };
 
 /* ---------- CLEANUP UPLOADED S3 KEYS ---------- */
@@ -67,6 +40,40 @@ const cleanupS3Keys = async (keys = []) => {
       console.error("S3 cleanup failed:", cleanupError.message);
     }
   }
+};
+
+/* ---------- GENERATE UNIQUE SLUG ---------- */
+const generateUniqueSlug = async ({
+  title = "",
+  customSlug = "",
+  currentBlogId = null,
+}) => {
+  const baseSource = String(customSlug || title || "").trim();
+
+  let baseSlug = slugify(baseSource, {
+    lower: true,
+    strict: true,
+    trim: true,
+  });
+
+  if (!baseSlug) {
+    baseSlug = `blog-${Date.now()}`;
+  }
+
+  let finalSlug = baseSlug;
+  let counter = 1;
+
+  while (
+    await Blog.exists({
+      slug: finalSlug,
+      ...(currentBlogId ? { _id: { $ne: currentBlogId } } : {}),
+    })
+  ) {
+    finalSlug = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  return finalSlug;
 };
 
 /* ---------- BUILD CONTENT WITH S3 URLS ---------- */
@@ -91,12 +98,21 @@ const buildContentWithUploads = async ({
           `Content image file not found for block index ${block.imageFileIndex}`
         );
         err.statusCode = 400;
+        err.errorCode = "CONTENT_IMAGE_NOT_FOUND";
         throw err;
       }
 
       const uploaded = await uploadToS3(file, "blog/content");
       imageUrl = uploaded.url;
       if (uploaded.key) uploadedKeys.push(uploaded.key);
+    } else if (
+      isUpdate &&
+      !block.image &&
+      oldContent[i] &&
+      oldContent[i].type === "image" &&
+      oldContent[i].image
+    ) {
+      imageUrl = oldContent[i].image;
     }
 
     const oldBlock = isUpdate ? oldContent[i] : null;
@@ -118,12 +134,13 @@ const buildContentWithUploads = async ({
 /* ---------- CREATE BLOG SERVICE ---------- */
 export const createBlogService = async ({ data, files, employee }) => {
   const uploadedKeys = [];
+
   try {
     const {
       title,
-      slug,
       shortDescription,
       content,
+      slug,
       tags = [],
       status = "draft",
       featured = false,
@@ -146,7 +163,10 @@ export const createBlogService = async ({ data, files, employee }) => {
       throw err;
     }
 
-    const finalSlug = await generateUniqueSlug(trimmedTitle, slug);
+    const finalSlug = await generateUniqueSlug({
+      title: trimmedTitle,
+      customSlug: slug,
+    });
 
     /* ---------- UPLOAD BANNER IMAGE ---------- */
     let bannerImage = "";
@@ -221,6 +241,7 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
     if (!blog) {
       const err = new Error("Blog not found");
       err.statusCode = 404;
+      err.errorCode = "BLOG_NOT_FOUND";
       throw err;
     }
     const {
@@ -231,85 +252,111 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
       tags,
       status,
       featured,
-      seo,
       permission,
       removeBannerImage = false,
     } = data;
 
-    /* ---------- TITLE / SLUG ---------- */
-    if (title !== undefined) blog.title = title.trim();
-
-    if (title !== undefined || slug !== undefined) {
-      blog.slug = await generateUniqueSlug(
-        title || blog.title,
-        slug || blog.slug,
-        blog._id
-      );
+    /* ---------- TITLE ---------- */
+    if (title !== undefined) {
+      blog.title = String(title).trim();
     }
-
+    /* ---------- SHORT DESCRIPTION ---------- */
     if (shortDescription !== undefined) {
-      blog.shortDescription = shortDescription.trim();
+      blog.shortDescription = String(shortDescription).trim();
     }
-    /* ---------- BANNER IMAGE ---------- */
+    /* ---------- TAGS ---------- */
+    if (tags !== undefined) {
+      blog.tags = normalizeTags(tags);
+    }
+    /* ---------- FEATURED ---------- */
+    if (featured !== undefined) {
+      blog.featured = featured;
+    }
+    /* ---------- BANNER IMAGE REMOVE ---------- */
     if (removeBannerImage && blog.bannerImage) {
       oldKeysToDelete.push(blog.bannerImage);
       blog.bannerImage = "";
     }
+    /* ---------- BANNER IMAGE UPLOAD ---------- */
     if (files?.bannerImage?.[0]) {
-      const uploadedBanner = await uploadToS3(files.bannerImage[0], "blog/banner");
-      blog.bannerImage = uploadedBanner.url;
+      if (blog.bannerImage) {
+        oldKeysToDelete.push(blog.bannerImage);
+      }
+
+      const uploadedBanner = await uploadToS3(
+        files.bannerImage[0],
+        "blog/banner"
+      );
+
+      blog.bannerImage = uploadedBanner.url || "";
       if (uploadedBanner.key) uploadedKeys.push(uploadedBanner.key);
     }
+
     /* ---------- CONTENT ---------- */
     if (content !== undefined) {
-      const oldContentImages = (blog.content || [])
-        .map((item) => item.image)
-        .filter(Boolean);
+      const oldContentImages = Array.isArray(blog.content)
+        ? blog.content.map((item) => item?.image).filter(Boolean)
+        : [];
 
       const finalContent = await buildContentWithUploads({
         content,
-        uploadedKeys,
         contentImageFiles: files?.contentImages || [],
+        uploadedKeys,
         oldContent: blog.content || [],
         isUpdate: true,
       });
+
       blog.content = finalContent;
-      const newContentImages = finalContent.map((item) => item.image).filter(Boolean);
+
+      const newContentImages = finalContent
+        .map((item) => item?.image)
+        .filter(Boolean);
+
       for (const oldImage of oldContentImages) {
         if (!newContentImages.includes(oldImage)) {
           oldKeysToDelete.push(oldImage);
         }
       }
+
       blog.readingTime = calculateReadingTime(finalContent);
     }
-
-    /* ---------- OTHER FIELDS ---------- */
-    if (tags !== undefined) blog.tags = normalizeTags(tags);
-    if (featured !== undefined) blog.featured = featured;
-    if (seo !== undefined){
-      blog.seo = {
-        metaTitle: seo?.metaTitle || "",
-        metaDescription: seo?.metaDescription || "",
-        keywords: Array.isArray(seo?.keywords)
-          ? seo.keywords.map((item) => item.trim()).filter(Boolean)
-          : [],
-        canonicalUrl: seo?.canonicalUrl || "",
-        ogImage: seo?.ogImage || "",
-      };
+    /* ---------- SLUG ---------- */
+    if (title !== undefined || slug !== undefined) {
+      blog.slug = await generateUniqueSlug({
+        title: blog.title,
+        customSlug: slug !== undefined ? slug : blog.slug,
+        currentBlogId: blog._id,
+      });
     }
+    /* ---------- STATUS ---------- */
     if (status !== undefined) {
       blog.status = status;
 
       if (status === "published" && !blog.publishedAt) {
         blog.publishedAt = new Date();
       }
-
       if (status !== "published") {
         blog.publishedAt = null;
       }
     }
-    await blog.save();
+    if (content === undefined && (!blog.readingTime || blog.readingTime < 1)) {
+      blog.readingTime = calculateReadingTime(blog.content || []);
+    }
 
+    /* ---------- AUTO REGENERATE SEO ---------- */
+    const { seo, seoAnalysis } = generateSEOContent({
+      title: blog.title || "",
+      shortDescription: blog.shortDescription || "",
+      content: blog.content || [],
+      tags: blog.tags || [],
+      slug: blog.slug || "",
+      bannerImage: blog.bannerImage || "",
+      baseUrl: process.env.FRONTEND_URL || process.env.WEBSITE_URL || "",
+      brandName: process.env.BRAND_NAME || "",
+    });
+    blog.seo = seo;
+    blog.seoAnalysis = seoAnalysis;
+    await blog.save();
     /* ---------- AUDIT ---------- */
     await PermissionAudit.create({
       permissionAuditId: uuidv6(),
@@ -320,9 +367,7 @@ export const updateBlogService = async ({ blogId, data, files, employee }) => {
       permission,
       actionType: "Update",
     });
-
-    /* ---------- DELETE OLD IMAGES AFTER SUCCESS ---------- */
-    await cleanupS3Keys(oldKeysToDelete);
+    await cleanupS3Keys([...new Set(oldKeysToDelete.filter(Boolean))]);
     return blog;
   } catch (error) {
     await cleanupS3Keys(uploadedKeys);

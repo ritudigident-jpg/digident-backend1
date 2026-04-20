@@ -73,13 +73,13 @@ export const createBlog = async (req, res) => {
  * @description
  * Update blog with optional banner replacement + optional content image replacement
  */
+
 export const updateBlog = async (req, res) => {
   try {
     const body = {
       ...req.body,
       content: parseJsonField(req.body.content, undefined),
       tags: parseJsonField(req.body.tags, undefined),
-      seo: parseJsonField(req.body.seo, undefined),
       featured:
         req.body.featured === undefined
           ? undefined
@@ -102,7 +102,6 @@ export const updateBlog = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
-
     const employee = await Employee.findOne({ email: req.user.email });
     if (!employee) {
       return sendError(res, {
@@ -123,7 +122,6 @@ export const updateBlog = async (req, res) => {
     return handleError(res, error);
   }
 };
-
 
 /**
  * @function getBlogs
