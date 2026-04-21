@@ -8,7 +8,6 @@ const ratingItemSchema = Joi.object({
     "string.min": "Question must be at least 3 characters long",
     "any.required": "Question is required",
   }),
-
   score: Joi.string()
     .valid(...ratingEnum)
     .required()
@@ -31,7 +30,12 @@ const reviewerInfoSchema = Joi.object({
     "number.min": "Age cannot be negative",
     "number.max": "Age cannot be greater than 120",
   }),
-
+   instituteName: Joi.string().trim().max(100).optional().messages({
+      "string.max": "Institute name must not exceed 100 characters",
+    }),
+    location: Joi.string().trim().max(100).optional().messages({
+      "string.max": "Location must not exceed 100 characters",
+    }),
   email: Joi.string().trim().email().required().messages({
     "string.email": "Invalid email format",
     "any.required": "Reviewer email is required",
@@ -105,7 +109,12 @@ export const updateProductReviewValidator = Joi.object({
       "number.min": "Age cannot be negative",
       "number.max": "Age cannot be greater than 120",
     }),
-
+    instituteName: Joi.string().trim().max(100).optional().messages({
+      "string.max": "Institute name must not exceed 100 characters",
+    }),
+    location: Joi.string().trim().max(100).optional().messages({
+      "string.max": "Location must not exceed 100 characters",
+    }),
     email: Joi.string().trim().email().optional().messages({
       "string.email": "Invalid email format",
     }),

@@ -41,6 +41,8 @@ const productReviewSchema = new mongoose.Schema(
 
     reviewerInfo:{
       name: { type: String, required: true, trim: true },
+      instituteName: { type: String, trim: true },
+      location: { type: String, trim: true },
       age: { type: Number },
       email: { type: String, required: true, lowercase: true },
       date: { type: Date, default: Date.now },
