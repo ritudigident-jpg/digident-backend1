@@ -380,6 +380,7 @@ export const getBlogsService = async (query) => {
   const page = Math.max(parseInt(query.page) || 1, 1);
   const limit = Math.min(Math.max(parseInt(query.limit) || 10, 1), 100);
   const skip = (page - 1) * limit;
+
   const {
     search,
     status,
@@ -393,7 +394,7 @@ export const getBlogsService = async (query) => {
   };
 
   /* ---------- SEARCH FILTER ---------- */
-  if (search?.trim()){
+  if (search?.trim()) {
     filter.$or = [
       { title: { $regex: search.trim(), $options: "i" } },
       { shortDescription: { $regex: search.trim(), $options: "i" } },
@@ -416,10 +417,17 @@ export const getBlogsService = async (query) => {
   }
 
   /* ---------- SORT ---------- */
-  const allowedSortFields = ["title", "createdAt", "updatedAt", "publishedAt"];
-  const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
-  const finalSortOrder = sortOrder === "asc" ? 1 : -1;
+  const allowedSortFields = [
+    "title",
+    "createdAt",
+    "updatedAt",
+    "publishedAt",
+  ];
 
+  const finalSortBy = allowedSortFields.includes(sortBy)
+    ? sortBy
+    : "createdAt";
+  const finalSortOrder = sortOrder === "asc" ? 1 : -1;
   const [blogs, totalItems] = await Promise.all([
     Blog.find(filter)
       .select({
@@ -444,20 +452,19 @@ export const getBlogsService = async (query) => {
       .lean(),
     Blog.countDocuments(filter),
   ]);
-
-  return {
-    blogs,
-    pagination: {
-      totalItems,
-      totalPages: Math.ceil(totalItems / limit),
-      currentPage: page,
-      nextPage: page * limit < totalItems ? page + 1 : null,
-      prevPage: page > 1 ? page - 1 : null,
-      limit,
-    },
+const totalPages = Math.ceil(totalItems / limit);
+return {
+  pagination: {
+    totalItems,
+    totalPages,
+    currentPage: page,
+    nextPage: page < totalPages ? page + 1 : null,
+    prevPage: page > 1 ? page - 1 : null,
+    limit,
+  },
+  blogs,
   };
 };
-
 
 /* ---------- INCREASE BLOG VIEW SERVICE ---------- */
 export const increaseBlogViewService = async ({ blogId }) => {

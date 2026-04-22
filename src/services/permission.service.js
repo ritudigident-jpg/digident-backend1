@@ -273,11 +273,11 @@ export const getPermissionAuditLogsService = async ({ page, limit }) => {
     .lean();
 
   /* ---------- PAGINATION META ---------- */
-  const pagination = getPaginationMeta({
+  const pagination = {
     totalItems,
     currentPage: page,
     limit,
-  });
+  };
 
   return {
     logs,

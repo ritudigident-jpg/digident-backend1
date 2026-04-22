@@ -118,13 +118,10 @@ export const updateProductReviewValidator = Joi.object({
     email: Joi.string().trim().email().optional().messages({
       "string.email": "Invalid email format",
     }),
-
     date: Joi.date().optional().messages({
       "date.base": "Date must be a valid date",
     }),
-  })
-    .min(1)
-    .optional(),
+  }).min(1).optional(),
 
   ratings: Joi.array().items(ratingItemSchema).min(1).optional().messages({
     "array.base": "Ratings must be an array",

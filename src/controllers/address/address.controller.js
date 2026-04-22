@@ -227,22 +227,16 @@ export const deleteAddress = async (req, res) => {
         errorCode: "VALIDATION_ERROR"
       });
     }
-
     const result = await deleteAddressService(user, addressId);
-
     return sendSuccess(
       res,
       result,
       200,
       "Address deleted successfully"
     );
-
   } catch (error) {
-
     console.error("Delete Address Error:", error);
-
     return handleError(res, error);
-
   }
 };
 
