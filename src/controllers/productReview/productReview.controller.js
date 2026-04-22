@@ -1,25 +1,28 @@
-import ProductReview from "../../models/manage/productReview.model.js";
-import { v6 as uuidv6 } from "uuid";
 import {
   validateCreateProductReviewBody,
   validateUpdateProductReviewBody,
 } from "./productReview.validation.js";
-import { sendError,handleError } from "../../helpers/error.helper.js";
-import {sendSuccess } from "../../helpers/response.helper.js";
-import { getPagination} from "../../helpers/pagination.helper.js";
-
+import { sendError, handleError } from "../../helpers/error.helper.js";
+import { sendSuccess } from "../../helpers/response.helper.js";
+import { getPagination } from "../../helpers/pagination.helper.js";
+import {
+  createProductReviewService,
+  getAllProductReviewsService,
+  getProductReviewByIdService,
+  updateProductReviewService,
+  deleteProductReviewService,
+} from "../../services/productReview.service.js";
 
 /**
  * @function createProductReview
  *
  * @description
- * Create a new product review.
+ * Create a new product review with one reviewer and multiple category reviews.
  *
  * @process
  * 1. Validate request body
- * 2. Generate unique reviewId
- * 3. Create review in database
- * 4. Return created review
+ * 2. Create product review using service layer
+ * 3. Return created review
  *
  * @response
  * 201 { success: true, message: "Product review created successfully", data: review }
@@ -37,9 +40,9 @@ export const createProductReview = async (req, res) => {
         details: error.details.map((err) => err.message),
       });
     }
-    const review = await ProductReview.create({
-      ...value,
-      reviewId: uuidv6(),
+
+    const review = await createProductReviewService({
+      data: value,
     });
 
     return sendSuccess(
@@ -61,9 +64,8 @@ export const createProductReview = async (req, res) => {
  *
  * @process
  * 1. Read pagination params
- * 2. Fetch reviews from database
- * 3. Sort by latest first
- * 4. Return paginated response
+ * 2. Fetch reviews from service layer
+ * 3. Return paginated response
  *
  * @response
  * 200 { success: true, message: "Product reviews fetched successfully", data: { reviews, pagination } }
@@ -72,27 +74,15 @@ export const getAllProductReviews = async (req, res) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
 
-    const [reviews, totalItems] = await Promise.all([
-      ProductReview.find()
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      ProductReview.countDocuments(),
-    ]);
-
-    const pagination = {
-      totalItems,
-      currentPage: page,
+    const result = await getAllProductReviewsService({
+      page,
       limit,
-    };
+      skip,
+    });
 
     return sendSuccess(
       res,
-      {
-        reviews,
-        pagination,
-      },
+      result,
       200,
       "Product reviews fetched successfully"
     );
@@ -109,7 +99,7 @@ export const getAllProductReviews = async (req, res) => {
  *
  * @process
  * 1. Read reviewId from params
- * 2. Find review by reviewId
+ * 2. Fetch review from service layer
  * 3. Return review if found
  *
  * @response
@@ -120,7 +110,7 @@ export const getProductReviewById = async (req, res) => {
   try {
     const { reviewId } = req.params;
 
-    const review = await ProductReview.findOne({ reviewId }).lean();
+    const review = await getProductReviewByIdService({ reviewId });
 
     if (!review) {
       return sendError(res, {
@@ -150,7 +140,7 @@ export const getProductReviewById = async (req, res) => {
  * @process
  * 1. Read reviewId from params
  * 2. Validate update body
- * 3. Update review in database
+ * 3. Update review using service layer
  * 4. Return updated review
  *
  * @response
@@ -161,7 +151,6 @@ export const getProductReviewById = async (req, res) => {
 export const updateProductReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
-
     const { value, error } = validateUpdateProductReviewBody(req.body);
 
     if (error) {
@@ -173,14 +162,10 @@ export const updateProductReview = async (req, res) => {
       });
     }
 
-    const updatedReview = await ProductReview.findOneAndUpdate(
-      { reviewId },
-      { $set: value },
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).lean();
+    const updatedReview = await updateProductReviewService({
+      reviewId,
+      data: value,
+    });
 
     if (!updatedReview) {
       return sendError(res, {
@@ -209,7 +194,7 @@ export const updateProductReview = async (req, res) => {
  *
  * @process
  * 1. Read reviewId from params
- * 2. Delete review from database
+ * 2. Delete review using service layer
  * 3. Return success response
  *
  * @response
@@ -220,7 +205,7 @@ export const deleteProductReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
 
-    const deletedReview = await ProductReview.findOneAndDelete({ reviewId });
+    const deletedReview = await deleteProductReviewService({ reviewId });
 
     if (!deletedReview) {
       return sendError(res, {
