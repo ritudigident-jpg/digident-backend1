@@ -1,9 +1,6 @@
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
-import {
-  getDefaultSellerDetails,
-  getDefaultBankDetails,
-} from "../helpers/invoiceDefault.helper.js";
+import {getDefaultSellerDetails,getDefaultBankDetails} from "../helpers/invoiceDefault.helper.js";
 import { getPagination } from "../helpers/pagination.helper.js";
 
 const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
@@ -72,6 +69,7 @@ export const createInvoiceService = async (data) => {
 
   return invoice;
 };
+
 
 export const updateInvoiceService = async ({ invoiceId, data }) => {
   const invoice = await Invoice.findOne({

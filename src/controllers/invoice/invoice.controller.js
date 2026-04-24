@@ -11,6 +11,7 @@ import { sendSuccess } from "../../helpers/response.helper.js";
 import Employee from "../../models/manage/employee.model.js";
 import { PermissionAudit } from "../../models/manage/permissionaudit.model.js";
 import { v6 as uuidv6 } from "uuid";
+import User from "../../models/ecommarace/user.model.js";
 
 /**
  * @function createInvoice
@@ -67,6 +68,36 @@ export const createInvoice = async (req, res) => {
   }
 };
 
+
+export const createInvoiceFromOrder = async(req,res)=>{
+  try{
+     const { value, error } = createInvoiceValidator.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      return sendError(res, {
+        message: "Validation failed",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        details: error.details.map((e) => e.message),
+      });
+    }
+    const user = await User.findOne({email: req.user.email});
+    if (!user) {
+      return sendError(res, {
+        message: "User not found",
+        statusCode: 404,
+        errorCode: "USER_NOT_FOUND",
+      });
+    }
+    const invoice = await createInvoiceService(value);
+    return sendSuccess(res, invoice, 201, "Invoice created successfully");
+  }catch(error){
+    return handleError(res, error);
+  }
+}
 /**
  * @function updateInvoice
  *
@@ -125,6 +156,40 @@ export const updateInvoice = async (req, res) => {
   }
 };
 
+
+export const updateInvoiceByUser = async (req, res) => {
+  try {
+    const { value, error } = createInvoiceValidator.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) {
+      return sendError(res, {
+        message: "Validation failed",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        details: error.details.map((e) => e.message),
+      });
+    }
+    const user = await User.findOne({ email: req.user.email });
+    if (!user) {
+      return sendError(res, {
+        message: "User not found",
+        statusCode: 404,
+        errorCode: "USER_NOT_FOUND",
+      });
+    }
+    const invoice = await updateInvoiceService({
+      invoiceId: req.params.invoiceId,
+      data: value,
+    });
+      // Additional logic for updating invoice by user
+    return sendSuccess(res, invoice, 200, "Invoice updated successfully");
+  }
+    catch (error) {
+      return handleError(res, error);
+    }
+}
 /**
  * @function deleteInvoice
  *
@@ -141,11 +206,9 @@ export const deleteInvoice = async (req, res) => {
         errorCode: "EMPLOYEE_NOT_FOUND",
       });
     }
-
     const invoice = await deleteInvoiceService({
       invoiceId: req.params.invoiceId,
     });
-
     await PermissionAudit.create({
       permissionAuditId: uuidv6(),
       actionBy: employee._id,
@@ -156,12 +219,52 @@ export const deleteInvoice = async (req, res) => {
       permission: req.body.permission || "invoice.manage.delete",
       actionType: "Delete",
     });
-
     return sendSuccess(res, null, 200, "Invoice deleted successfully");
   } catch (error) {
     return handleError(res, error);
   }
 };
+
+export const deleteInvoiceByUser = async (req, res) => {  
+  try {
+    const user = await User.findOne({ email: req.user.email });
+    if (!user) {
+      return sendError(res, {
+        message: "User not found",
+        statusCode: 404,
+        errorCode: "USER_NOT_FOUND",
+      });
+    }
+    const invoice = await deleteInvoiceService({
+      invoiceId: req.params.invoiceId,
+    }); 
+    return sendSuccess(res, null, 200, "Invoice deleted successfully");
+    // Additional logic for deleting invoice by user
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+
+export const getInvoiceByIdForUser = async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user.email }); 
+    if (!user) {
+      return sendError(res, {
+        message: "User not found",  
+        statusCode: 404,  
+        errorCode: "USER_NOT_FOUND",
+      });
+    }
+    const invoice = await getInvoiceByIdService({
+      invoiceId: req.params.invoiceId,
+    }); 
+    return sendSuccess(res, invoice, 200, "Invoice fetched successfully");
+  } catch (error) { 
+    return handleError(res, error);
+    }
+  };
+
 
 /**
  * @function getInvoiceById

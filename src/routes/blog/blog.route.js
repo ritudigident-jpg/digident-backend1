@@ -1,54 +1,57 @@
 import express from "express";
-import upload from "../../middlewares/multer.middleware.js";
-import auth from "../../middlewares/auth.middleware.js";
-import { checkPermission } from "../../middlewares/permission.middleware.js";
+
 import {
   createBlog,
-  getBlogById,
   getBlogs,
+  getBlogById,
+  getBlogBySlug,
   updateBlog,
-  deleteBlog
+  deleteBlog,
 } from "../../controllers/blog/blog.controller.js";
-import { addBlogComment, deleteBlogComment, increaseBlogView } from "../../controllers/blog/blogView.controller.js";
+
+import Auth from "../../middlewares/auth.middleware.js";
+import { checkPermission } from "../../middlewares/permission.middleware.js";
 
 const router = express.Router();
 
+/* ---------- MANAGE ROUTES ---------- */
 router.post(
-  "/create",
-  upload.fields([
-    { name: "bannerImage", maxCount: 1 },
-    { name: "contentImages", maxCount: 50 },
-  ]),
-  auth,
-  checkPermission(),
+  "/manage/blogs",
+  Auth,
+  checkPermission,
   createBlog
 );
 
-router.put(
-  "/update/:blogId",
-  upload.fields([
-    { name: "bannerImage", maxCount: 1 },
-    { name: "contentImages", maxCount: 50 },
-  ]),
-  auth,
-  checkPermission(),
+router.get(
+  "/manage/blogs",
+  Auth,
+  checkPermission,
+  getBlogs
+);
+
+router.get(
+  "/manage/blogs/:blogId",
+  Auth,
+  checkPermission,
+  getBlogById
+);
+
+router.patch(
+  "/manage/blogs/:blogId",
+  Auth,
+  checkPermission,
   updateBlog
 );
 
-/* ---------- GET ALL BLOGS ---------- */
-router.get("/manage/get/:permission", auth, checkPermission(), getBlogs);
-router.get("/", getBlogs);
-router.get("/:blogId", getBlogById);
+router.delete(
+  "/manage/blogs/:blogId",
+  Auth,
+  checkPermission,
+  deleteBlog
+);
 
-/* ---------- GET BLOG BY ID ---------- */
-router.get("/manage/get/:blogId/:permission", auth, checkPermission(), getBlogById);
-
-router.delete("/manage/delete/:blogId", auth, checkPermission(),deleteBlog);
-
-router.post("/comment/:blogId", addBlogComment);
-
-router.post("/:blogId/view", increaseBlogView);
-
-router.delete("/manage/delete/comment/:blogId/:commentId", auth, checkPermission(), deleteBlogComment);
+/* ---------- PUBLIC ROUTES ---------- */
+router.get("/blogs", getBlogs);
+router.get("/blogs/:slug", getBlogBySlug);
 
 export default router;
