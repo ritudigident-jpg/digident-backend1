@@ -3,6 +3,7 @@ import {sendEmailOtp,getCustomerData,deleteCustomerData,getAllConsumers,verifyOt
 
 const router = express.Router();
 
+router.patch("/scanbridge", updateScanbridgeLibrary);
 // Send OTP to email
 router.post("/send-otp",sendEmailOtp);
 
@@ -27,6 +28,6 @@ router.get("/dashboard",getLibraryDashboard);
 router.delete("/deleteUser/:email",deleteOtpByEmail);
 
 router.get("/scanbridge", getScanbridgeLibrary);
-router.patch("/scanbridge", updateScanbridgeLibrary);
+
 
 export default router;

@@ -380,9 +380,8 @@ export const getScanbridgeLibraryService = async ({
 export const updateScanbridgeLibraryService = async ({
   customerId,
   logId,
-  isdelivered
+  isdelivered,
 }) => {
-  /* ---------- VALIDATE OBJECT IDS ---------- */
   if (!mongoose.Types.ObjectId.isValid(customerId)) {
     const error = new Error("Invalid customerId");
     error.statusCode = 400;
@@ -397,50 +396,62 @@ export const updateScanbridgeLibraryService = async ({
     throw error;
   }
 
-  /* ---------- FIND CUSTOMER ---------- */
-  const customer = await CustomerData.findOne({
-    _id: customerId,
-    "logLibrary._id": logId
-  });
+  const customer = await CustomerData.findOne(
+    {
+      _id: customerId,
+      logLibrary: {
+        $elemMatch: {
+          _id: logId,
+          category: { $regex: /^scanbridge$/i },
+        },
+      },
+    },
+    {
+      "logLibrary.$": 1,
+    }
+  ).lean();
 
-  if (!customer) {
-    const error = new Error("Customer or logLibrary not found");
+  if (!customer || !customer.logLibrary?.length) {
+    const error = new Error("Scanbridge library log not found");
     error.statusCode = 404;
-    error.errorCode = "CUSTOMER_OR_LIBRARY_LOG_NOT_FOUND";
+    error.errorCode = "SCANBRIDGE_LIBRARY_LOG_NOT_FOUND";
     throw error;
   }
 
-  /* ---------- FIND LIBRARY LOG ---------- */
-  const libraryLog = customer.logLibrary.find(
-    (item) => item._id.toString() === logId.toString()
+  await CustomerData.updateOne(
+    {
+      _id: customerId,
+      "logLibrary._id": logId,
+      "logLibrary.category": { $regex: /^scanbridge$/i },
+    },
+    {
+      $set: {
+        "logLibrary.$.isdelivered": isdelivered,
+      },
+    },
+    {
+      runValidators: false,
+    }
   );
 
-  if (!libraryLog) {
-    const error = new Error("Library log not found");
-    error.statusCode = 404;
-    error.errorCode = "LIBRARY_LOG_NOT_FOUND";
-    throw error;
-  }
+  const updatedCustomer = await CustomerData.findOne(
+    {
+      _id: customerId,
+      "logLibrary._id": logId,
+    },
+    {
+      "logLibrary.$": 1,
+    }
+  ).lean();
 
-  /* ---------- CHECK CATEGORY ---------- */
-  if (libraryLog.category?.toLowerCase() !== "scanbridge") {
-    const error = new Error("Only scanbridge category can be updated");
-    error.statusCode = 400;
-    error.errorCode = "INVALID_CATEGORY";
-    throw error;
-  }
-
-  /* ---------- UPDATE STATUS ---------- */
-  libraryLog.isdelivered = isdelivered;
-
-  await customer.save();
+  const libraryLog = updatedCustomer.logLibrary[0];
 
   return {
-    customerId: customer._id,
+    customerId,
     logId: libraryLog._id,
     brandName: libraryLog.brandName || null,
     category: libraryLog.category,
     isdelivered: libraryLog.isdelivered,
-    date: libraryLog.date
+    date: libraryLog.date,
   };
 };
