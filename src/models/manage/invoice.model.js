@@ -21,7 +21,6 @@ const invoiceItemSchema = new Schema(
     qty: {
       type: Number,
       required: true,
-      min: 1,
     },
     price: {
       type: Number,

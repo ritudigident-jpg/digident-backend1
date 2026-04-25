@@ -25,7 +25,7 @@ router.post(
 router.get(
   "/manage/blogs",
   Auth,
-  checkPermission,
+  //checkPermission,
   getBlogs
 );
 
@@ -39,7 +39,7 @@ router.get(
 router.patch(
   "/manage/blogs/:blogId",
   Auth,
-  checkPermission,
+  // checkPermission,
   updateBlog
 );
 

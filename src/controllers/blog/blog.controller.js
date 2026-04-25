@@ -19,7 +19,6 @@ import { getPagination } from "../../helpers/pagination.helper.js";
 
 export const createBlog = async (req, res) => {
   try {
-      console.log("🔥 createBlog hit");
     const { value, error } = createBlogValidator.validate(req.body, {
       abortEarly: false,
       stripUnknown: true,
@@ -33,9 +32,7 @@ export const createBlog = async (req, res) => {
         details: error.details.map((e) => e.message),
       });
     }
-
     const employee = await Employee.findOne({ email: req.user.email });
-
     if (!employee) {
       return sendError(res, {
         message: "Employee not found",
@@ -48,7 +45,6 @@ export const createBlog = async (req, res) => {
       data: value,
       employee,
     });
-
     return sendSuccess(res, blog, 201, "Blog created successfully");
   } catch (error) {
     return handleError(res, error);

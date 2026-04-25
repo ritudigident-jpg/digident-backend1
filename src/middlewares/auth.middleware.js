@@ -23,6 +23,7 @@ import jwt from "jsonwebtoken";
 import { sendError, handleError } from "../helpers/error.helper.js";
 
 const authToken = async (req, res, next) => {
+  console.log("🔥 authToken middleware hit")  ;
   try {
     /* =========================
        CHECK AUTH HEADER
