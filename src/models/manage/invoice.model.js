@@ -279,37 +279,37 @@ const invoiceSchema = new Schema(
   }
 );
 
-invoiceSchema.pre("save", function () {
-  let totalGrossValue = 0;
-  let totalDiscount = 0;
-  let totalNet = 0;
-  let totalTax = 0;
-  for (const item of this.items) {
-    const gross = Number(item.qty || 0) * Number(item.price || 0);
-    const discountValue =
-      item.discountPercent > 0
-        ? (gross * Number(item.discountPercent || 0)) / 100
-        : Number(item.discountValue || 0);
-    const net = gross - discountValue;
-    const gstAmount = (net * Number(item.gstPercent || 0)) / 100;
-    const totalAmount = net + gstAmount;
-    item.discountValue = discountValue;
-    item.totalNet = net;
-    item.gstAmount = gstAmount;
-    item.totalAmount = totalAmount;
-    totalGrossValue += gross;
-    totalDiscount += discountValue;
-    totalNet += net;
-    totalTax += gstAmount;
-  }
-  this.summary.totalGrossValue = totalGrossValue;
-  this.summary.totalDiscount = totalDiscount;
-  this.summary.totalNet = totalNet;
-  this.summary.totalTax = totalTax;
-  this.summary.totalPayAmount =
-    totalNet + Number(this.summary.freightCost || 0) + totalTax;
-  this.summary.amountToPay =
-    this.summary.totalPayAmount - Number(this.summary.paidAmount || 0);
-});
+// invoiceSchema.pre("save", function () {
+//   let totalGrossValue = 0;
+//   let totalDiscount = 0;
+//   let totalNet = 0;
+//   let totalTax = 0;
+//   for (const item of this.items) {
+//     const gross = Number(item.qty || 0) * Number(item.price || 0);
+//     const discountValue =
+//       item.discountPercent > 0
+//         ? (gross * Number(item.discountPercent || 0)) / 100
+//         : Number(item.discountValue || 0);
+//     const net = gross - discountValue;
+//     const gstAmount = (net * Number(item.gstPercent || 0)) / 100;
+//     const totalAmount = net + gstAmount;
+//     item.discountValue = discountValue;
+//     item.totalNet = net;
+//     item.gstAmount = gstAmount;
+//     item.totalAmount = totalAmount;
+//     totalGrossValue += gross;
+//     totalDiscount += discountValue;
+//     totalNet += net;
+//     totalTax += gstAmount;
+//   }
+//   this.summary.totalGrossValue = totalGrossValue;
+//   this.summary.totalDiscount = totalDiscount;
+//   this.summary.totalNet = totalNet;
+//   this.summary.totalTax = totalTax;
+//   this.summary.totalPayAmount =
+//     totalNet + Number(this.summary.freightCost || 0) + totalTax;
+//   this.summary.amountToPay =
+//     this.summary.totalPayAmount - Number(this.summary.paidAmount || 0);
+// });
 const Invoice = model("Invoice", invoiceSchema);
 export default Invoice;

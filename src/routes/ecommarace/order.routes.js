@@ -7,7 +7,7 @@ import { checkPermission } from "../../middlewares/permission.middleware.js";
 const router = express.Router();
 // ADMIN ROUTES
 router.get("/get/all", getAllOrdersAdmin);
-router.patch("/:orderId/status",auth,checkPermission(), updateOrderStatus);
+router.patch("/:orderId/status",auth,checkPermission, updateOrderStatus);
 router.get("/get/status/:status", getOrdersByStatus);
 // USER ROUTES
 router.post("/create",auth,attachUser, createOrder);
@@ -16,7 +16,7 @@ router.get("/my-orders",auth,attachUser, getUserOrders);
 // router.post("/payment/initiate/:orderId", employeeVerifyAccessToken, initiatePayment);
 router.put("/cancel/:orderId",auth, attachUser, cancelOrder);
 router.get("/get/:orderId",auth,attachUser, getSingleOrder);
-router.put("/refund/complete/admin/:orderId",auth,checkPermission(),markRefundCompleteAdmin);
+router.put("/refund/complete/admin/:orderId",auth,checkPermission,markRefundCompleteAdmin);
 // router.delete("/delete", deleteAllOrders);
 // add middleware to verify user and attach user
 router.put("/refund/complete/:orderId",markRefundCompleted);
@@ -25,7 +25,7 @@ router.get("/allorders",getAllOrders)
 router.post("/return",auth,attachUser, createReturnRequest);
 router.put("/return/update/:orderId/:requestId",auth,attachUser,updatePendingReturnRequest);
 router.get("/return-req/get",getAllReturnRequests);
-router.put("/return/update/status/:orderId/:requestId",auth,checkPermission(), updateReturnRequestStatus);
-router.put("/courier/:orderId",auth,checkPermission(),updateCourierDetails);
-export default router;
+router.put("/return/update/status/:orderId/:requestId",auth,checkPermission, updateReturnRequestStatus);
+router.put("/courier/:orderId",auth,checkPermission,updateCourierDetails);
+export default router;  
 

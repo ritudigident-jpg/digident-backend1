@@ -9,16 +9,16 @@ router.post(
   "/create",upload.fields([
     { name: "logoUrl", maxCount: 1 },
     { name: "file", maxCount: 5 },
-  ]), auth, checkPermission(),
+  ]), auth, checkPermission,
   createBrand
 );
 router.get("/all",getAllBrands);
-router.delete("/delete/:brandId",auth, checkPermission(), deleteBrandByBrandId);
+router.delete("/delete/:brandId",auth, checkPermission, deleteBrandByBrandId);
 router.put(
   "/update/:brandId", upload.fields([
     { name: "logoUrl", maxCount: 1 },
     { name: "file", maxCount: 5 },
-  ]), auth, checkPermission(),
+  ]), auth, checkPermission,
   updateBrand
 );
 router.get("/get/:brandId", getBrandById);

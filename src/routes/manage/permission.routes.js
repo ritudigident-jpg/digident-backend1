@@ -10,7 +10,7 @@ router.get("/all", auth, checkAdminRole, getAllPermissions);
 router.delete("/delete/:permissionId", auth,checkAdminRole ,deletePermission);
 
 
-router.post("/assign", auth,checkPermission(),assignPermissionToEmployee);
-router.post("/remove" ,auth,checkPermission(),removePermissionFromEmployee);
+router.post("/assign", auth,checkPermission,assignPermissionToEmployee);
+router.post("/remove" ,auth,checkPermission,removePermissionFromEmployee);
 router.get("/audit-logs", auth, checkAdminRole, getPermissionAuditLogs);
 export default router;

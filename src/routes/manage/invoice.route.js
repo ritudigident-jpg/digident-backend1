@@ -5,18 +5,18 @@ import { checkPermission } from "../../middlewares/permission.middleware.js";
 const router = express.Router();
 
 router.post("/manage/create", auth,
-  checkPermission(),
+  checkPermission,
    createInvoice);
 router.put("/manage/update/:invoiceId", auth,
-  checkPermission(),
+  checkPermission,
    updateInvoice);
 router.get("/manage/get/:permission", auth,
-  checkPermission(),
+  checkPermission,
    getInvoices);
 router.get("/manage/get/:invoiceId/:permission", auth,
-  checkPermission(),
+  checkPermission,
    getInvoiceById);
-router.delete("/manage/delete/:invoiceId", auth,checkPermission(), deleteInvoice);  
+router.delete("/manage/delete/:invoiceId", auth,checkPermission, deleteInvoice);  
 
 router.post("/create", auth, createInvoiceFromOrder);
    router.get("/get/:invoiceId", auth, getInvoiceByIdForUser);

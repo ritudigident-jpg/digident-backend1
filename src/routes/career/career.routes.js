@@ -51,14 +51,14 @@ router.post(
 router.post(
   "/manage/jobs",
   authToken,
-  checkPermission(),
+  checkPermission,
   createJob
 );
 
 router.get(
   "/manage/jobs/:permission",
   authToken,
-  checkPermission(),
+  checkPermission,
   getManageJobs
 );
 
@@ -66,21 +66,21 @@ router.get(
 router.get(
   "/manage/jobs/:jobId/:permission",
   authToken,
-  checkPermission(),
+  checkPermission,
   getJobById
 );
 
 router.put(
   "/manage/jobs/:jobId",
   authToken,
-  checkPermission(),
+  checkPermission,
   updateJob
 );
 
 router.delete(
   "/manage/jobs/:jobId",
   authToken,
-  checkPermission(),
+  checkPermission,
   deleteJob
 );
 
@@ -88,35 +88,35 @@ router.delete(
 router.get(
   "/manage/applications/:permission",
   authToken,
-  checkPermission(),
+  checkPermission,
   getManageApplications
 );
 
 router.get(
   "/manage/applications/:applicationId/:permission",
   authToken,
-  checkPermission(),
+  checkPermission,
   getApplicationById
 );
 
 router.patch(
   "/manage/applications/:applicationId/status",
   authToken,
-  checkPermission(),
+  checkPermission,
   updateApplicationStatus
 );
 
 router.post(
   "/manage/applications/:applicationId/note",
   authToken,
-  checkPermission("career.application.update"),
+  checkPermission,
   addApplicationNote
 );
 
 router.patch(
   "/manage/applications/:applicationId/assign",
   authToken,
-  checkPermission("career.application.assign"),
+  checkPermission,
   assignApplication
 );
 

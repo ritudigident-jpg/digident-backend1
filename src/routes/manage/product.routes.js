@@ -16,7 +16,7 @@ router.post(
   ]),
   parseMultipartJson,
  auth,
-  checkPermission(),
+  checkPermission,
   addProduct
 );
 router.put(
@@ -28,14 +28,14 @@ router.put(
   ]),
   parseMultipartJson,
   auth,
-  checkPermission(),
+  checkPermission,
   updateProduct
 );
 router.get("/get/status/:status", getProductsByStatus);
 router.get("/best-selling", getBestSellerProducts);
 router.get("/getById/:productId", getProductById);
-router.delete("/delete/:productId",auth,checkPermission(), deleteProduct);
-router.put("/stock/:productId",auth,checkPermission(), updateProductStock);
-router.post("/duplicate",auth,checkPermission(), duplicateProduct);
+router.delete("/delete/:productId",auth,checkPermission, deleteProduct);
+router.put("/stock/:productId",auth,checkPermission, updateProductStock);
+router.post("/duplicate",auth,checkPermission, duplicateProduct);
 
 export default router;

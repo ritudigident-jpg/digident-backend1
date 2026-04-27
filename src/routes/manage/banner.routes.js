@@ -14,12 +14,12 @@ import { checkPermission } from "../../middlewares/permission.middleware.js";
 
 const router = express.Router();
 
-router.post("/create", upload.single("imageUrl"),auth,checkPermission(),createBanner);
+router.post("/create", upload.single("imageUrl"),auth,checkPermission,createBanner);
 router.get("/products/:bannerId",getProductsByBanner);
 router.get("/get",getAllBanners);
 router.get("/status",getBannersByIsActive);
-router.put("/update/DisplayOrder/:bannerId",auth, checkPermission(), updateBannerDisplayOrder);
-router.put("/update/:bannerId",upload.single("imageUrl"),auth, checkPermission(), updateBanner);
-router.delete("/delete/:bannerId",auth, checkPermission(), deleteBanner);
+router.put("/update/DisplayOrder/:bannerId",auth, checkPermission, updateBannerDisplayOrder);
+router.put("/update/:bannerId",upload.single("imageUrl"),auth, checkPermission, updateBanner);
+router.delete("/delete/:bannerId",auth, checkPermission, deleteBanner);
 
 export default router;

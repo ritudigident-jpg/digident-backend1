@@ -10,9 +10,9 @@ import { checkPermission } from "../../middlewares/permission.middleware.js";
 
 const router = express.Router();
 
-router.post("/add",auth,checkPermission(), addVideo);
+router.post("/add",auth,checkPermission, addVideo);
 router.get("/get",getAllVideos);
-router.put("/update/:ytVideoId",auth,checkPermission(), updateVideo);
-router.delete("/delete/:ytVideoId",auth,checkPermission(), deleteVideo);
+router.put("/update/:ytVideoId",auth,checkPermission, updateVideo);
+router.delete("/delete/:ytVideoId",auth,checkPermission, deleteVideo);
 
 export default router;

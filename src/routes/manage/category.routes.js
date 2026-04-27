@@ -11,9 +11,9 @@ import { checkPermission } from "../../middlewares/permission.middleware.js";
 
 const router = express.Router();
 
-router.post("/create",upload.single("image"), auth,checkPermission(),createCategory);
+router.post("/create",upload.single("image"), auth,checkPermission,createCategory);
 router.get("/get", getAllCategories);
-router.put("/update/:categoryId",upload.single("image"), auth,checkPermission(),  updateCategory);
-router.delete("/delete/:categoryId",auth,checkPermission(), deleteCategory);
+router.put("/update/:categoryId",upload.single("image"), auth,checkPermission,  updateCategory);
+router.delete("/delete/:categoryId",auth,checkPermission, deleteCategory);
 
 export default router;
