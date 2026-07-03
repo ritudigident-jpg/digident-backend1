@@ -57,7 +57,14 @@ export const updateWhatsapp = asyncHandler(async (req, res) => {
 // POST /leads/:id/followup/:stageType  (stageType is 'pre-sale' or 'post-sale')
 export const logFollowUp = asyncHandler(async (req, res) => {
   const email = req.user?.email;
-  const data = await svc.logFollowUp(req.params.id, req.params.stageType, email, req.body);
+
+  const data = await svc.logFollowUp(
+    req.params.id,
+    req.params.stageType,
+    email,
+    req.body
+  );
+
   ok(res, { data });
 }, 400);
 

@@ -417,65 +417,73 @@ export const updateWhatsapp = async (id, whatsappData = {}) => {
 };
 
 
-/* ─── LOG FOLLOW-UP TOUCH (auto-rolls into next round; stage does NOT
-     change here — only the explicit "Move to Follow-up" action changes
-     stage. This just records the call outcome and bumps callCount) ──── */
-export const logFollowUp = async (id, stageType, email, payload) => {
-  if (!["pre-sale", "post-sale"].includes(stageType)) {
-    throw new Error("Invalid stage type");
-  }
-  if (!payload.nextCallDate) {
-    throw new Error("nextCallDate is required");
-  }
+export const logFollowUp = async (
+  leadId,
+  stageType,
+  email,
+  body
+) => {
+  const lead = await DentalLead.findById(leadId);
 
-  const employee = await Employee.findOne(
-    { email },
-    { firstName: 1, lastName: 1, _id: 1 }
-  ).lean();
-  if (!employee) throw new Error("Employee not found");
-
-  const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
-  if (!lead) throw new Error("Lead not found");
-
-  if (stageType === "post-sale" && lead.stage !== "client") {
-    throw new Error("Post-sale follow-ups can only be logged for clients");
+  if (!lead) {
+    const err = new Error("Lead not found");
+    err.statusCode = 404;
+    throw err;
   }
 
-  const arr = stageType === "pre-sale" ? lead.preSaleFollowups : lead.postSaleFollowups;
+  const employee = await Employee.findOne({ email });
 
-  const last = arr[arr.length - 1];
-  let round = 1;
-  let touchNumber = 1;
-  if (last) {
-    if (last.touchNumber < 3) {
-      round = last.round;
-      touchNumber = last.touchNumber + 1;
-    } else {
-      round = last.round + 1;
-      touchNumber = 1;
-    }
+  if (!employee) {
+    const err = new Error("Employee not found");
+    err.statusCode = 404;
+    throw err;
   }
 
-  const entry = {
-    agent: `${employee.firstName || ""} ${employee.lastName || ""}`.trim(),
-    employeeId: employee._id,
-    callStatus: payload.callStatus,
-    reason: payload.reason || "",
-    nextCallDate: new Date(payload.nextCallDate),
-    round,
-    touchNumber,
-    loggedAt: new Date(),
-  };
+  const agent =
+    `${employee.firstName || ""} ${employee.lastName || ""}`.trim() ||
+    employee.email;
 
-  arr.push(entry);
+  /* ---------------------------------------
+      PRE SALE
+  --------------------------------------- */
 
-  // A logged follow-up touch IS a call — bump the counter automatically.
-  lead.callCount = (lead.callCount || 0) + 1;
+  if (stageType === "pre-sale") {
+    const followup = {
+      agent,
+      employeeId: employee._id,
+      notes: body.notes,
+      hurdle: body.hurdle || "",
+      nextCallDate: body.nextCallDate,
+    };
 
-  // NOTE: stage intentionally NOT changed here. Agent must explicitly use
-  // the "→ Follow-up" action button (moveToFollowup) to move stages.
+    lead.preSaleFollowups.push(followup);
 
-  return await lead.save();
+    await lead.save();
+
+    return lead;
+  }
+
+  /* ---------------------------------------
+      POST SALE
+  --------------------------------------- */
+
+  if (stageType === "post-sale") {
+    const followup = {
+      agent,
+      employeeId: employee._id,
+      notes: body.notes,
+      hurdle: body.hurdle || "",
+      nextCallDate: body.nextCallDate,
+    };
+
+    lead.postSaleFollowups.push(followup);
+
+    await lead.save();
+
+    return lead;
+  }
+
+  throw new Error("Invalid stage type");
 };
 
 /* ─── CONVERT FOLLOW-UP ➔ CLIENT ─────────────────────────────────────────── */
@@ -592,4 +600,62 @@ export const importFromExcel = async (fileBuffer) => {
   }
 
   return results;
+};
+
+
+export const logRemarkFollowUp = async (
+  leadId,
+  email,
+  body
+) => {
+  const lead = await DentalLead.findById(leadId);
+
+  if (!lead) {
+    const err = new Error("Lead not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const employee = await Employee.findOne({ email });
+
+  if (!employee) {
+    const err = new Error("Employee not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const agent =
+    `${employee.firstName || ""} ${employee.lastName || ""}`.trim() ||
+    employee.email;
+
+  const previous = lead.remarkFollowups;
+
+  let round = 1;
+  let touchNumber = 1;
+
+  if (previous.length) {
+    const last = previous[previous.length - 1];
+
+    if (last.touchNumber >= 3) {
+      round = last.round + 1;
+      touchNumber = 1;
+    } else {
+      round = last.round;
+      touchNumber = last.touchNumber + 1;
+    }
+  }
+
+  lead.remarkFollowups.push({
+    agent,
+    employeeId: employee._id,
+    callStatus: body.callStatus,
+    reason: body.reason || "",
+    nextCallDate: body.nextCallDate,
+    round,
+    touchNumber,
+  });
+
+  await lead.save();
+
+  return lead;
 };
