@@ -657,5 +657,7 @@ export const logRemarkFollowUp = async (
 
   await lead.save();
 
-  return lead;
+console.log("nextFollowUpDate:", lead.nextFollowUpDate);
+
+return lead;
 };
