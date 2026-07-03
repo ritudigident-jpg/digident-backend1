@@ -183,7 +183,6 @@ const stageFollowupSchema = new mongoose.Schema(
 
     notes: {
       type: String,
-      required: true,
       trim: true,
     },
 
