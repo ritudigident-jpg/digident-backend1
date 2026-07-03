@@ -395,8 +395,13 @@ const dentalLeadSchema = new mongoose.Schema(
    Automatically store the nearest upcoming follow-up date
 ──────────────────────────────────────────────────────────────── */
 dentalLeadSchema.pre("save", function (next) {
-  const sortByNextCallDate = (arr = []) =>
-    arr.sort((a, b) => new Date(a.nextCallDate) - new Date(b.nextCallDate));
+  const sortByNextCallDate = (arr = []) => {
+    arr.sort((a, b) => {
+      const dateA = a?.nextCallDate ? new Date(a.nextCallDate).getTime() : Number.MAX_SAFE_INTEGER;
+      const dateB = b?.nextCallDate ? new Date(b.nextCallDate).getTime() : Number.MAX_SAFE_INTEGER;
+      return dateA - dateB;
+    });
+  };
 
   sortByNextCallDate(this.remarkFollowups);
   sortByNextCallDate(this.preSaleFollowups);
@@ -407,14 +412,15 @@ dentalLeadSchema.pre("save", function (next) {
     ...this.preSaleFollowups,
     ...this.postSaleFollowups,
   ]
-    .map((f) => f?.nextCallDate)
+    .map(f => f?.nextCallDate)
     .filter(Boolean)
-    .map((d) => new Date(d));
+    .map(d => new Date(d).getTime())
+    .filter(time => !isNaN(time));
 
   this.nextFollowUpDate =
-    dates.length > 0
-      ? new Date(Math.min(...dates))
-      : null;
+    dates.length > 0 ? new Date(Math.min(...dates)) : null;
+
+  next();
 });
 
 export default mongoose.model("DentalLead", dentalLeadSchema);
