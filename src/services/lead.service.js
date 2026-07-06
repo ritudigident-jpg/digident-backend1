@@ -304,27 +304,65 @@ const COL_MAP = {
 ═══════════════════════════════════════════════════════════════════════════ */
 export const getAllLeads = async (filters = {}) => {
   const { stage, search, page = 1, limit = 200 } = filters;
+
   const query = { ...baseQuery };
+
   if (stage) query.stage = stage;
+
   if (search) {
     query.$or = [
       { doctorName: new RegExp(search, "i") },
       { clinicName: new RegExp(search, "i") },
-      { city:       new RegExp(search, "i") },
-      { contact:    new RegExp(search, "i") },
-      { remarks:    new RegExp(search, "i") },
+      { city: new RegExp(search, "i") },
+      { contact: new RegExp(search, "i") },
+      { remarks: new RegExp(search, "i") },
     ];
   }
+
   const skip = (parseInt(page) - 1) * parseInt(limit);
-  const [leads, total] = await Promise.all([
-    DentalLead.find(query)
-      .sort({ nextFollowUpDate: 1, createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean(),
-    DentalLead.countDocuments(query),
+
+  const [leads, totalResult] = await Promise.all([
+    DentalLead.aggregate([
+      { $match: query },
+
+      {
+        $addFields: {
+          sortOrder: {
+            $cond: [
+              { $eq: ["$nextFollowUpDate", null] },
+              1, // No follow-up -> bottom
+              0, // Has follow-up -> top
+            ],
+          },
+        },
+      },
+
+      {
+        $sort: {
+          sortOrder: 1,
+          nextFollowUpDate: 1,
+          createdAt: -1,
+        },
+      },
+
+      { $skip: skip },
+      { $limit: parseInt(limit) },
+    ]),
+
+    DentalLead.aggregate([
+      { $match: query },
+      { $count: "total" },
+    ]),
   ]);
-  return { leads, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) };
+
+  const total = totalResult.length ? totalResult[0].total : 0;
+
+  return {
+    leads,
+    total,
+    page: parseInt(page),
+    totalPages: Math.ceil(total / parseInt(limit)),
+  };
 };
 
 /* ─── CREATE INQUIRY ─────────────────────────────────────────────────────── */

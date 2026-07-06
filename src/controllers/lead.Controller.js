@@ -91,7 +91,7 @@ export const getUpcomingFollowUps = asyncHandler(async (req, res) => {
   ok(res, { data, count: data.length });
 });
 
-/* ─ Excel File Import ────────────────────────────────────────────────────── */
+/* ─ Excel File Import ──────────────────────────────────────────────────── */
 
 export const importExcel = asyncHandler(async (req, res) => {
   if (!req.file) {
