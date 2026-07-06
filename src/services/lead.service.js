@@ -4,9 +4,9 @@ import Employee from "../models/manage/employee.model.js";
 import { autoAssignNewLead, resolveActingEmployee } from "./assignment.service.js";
 
 const baseQuery = { isDeleted: false };
+const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
 const norm = (s) => String(s ?? "").toLowerCase().trim().replace(/[\s_\-\/\.]+/g, " ");
 
-/* ─── Column Map handles flexible naming strategies across varying sheets ─── */
 const COL_MAP = {
   "doctor name":     "doctorName",
   "name":            "doctorName",
@@ -30,12 +30,12 @@ const COL_MAP = {
   "assigned to":     "contactBy",
 };
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   GET ALL LEADS (Sorted by upcoming nextFollowUpDate first, then newest)
-═══════════════════════════════════════════════════════════════════════════ */
-export const getAllLeads = async (filters = {}) => {
+/* ═══════════════════════════════════════════════════════════════════════
+   GET ALL LEADS — role-scoped. Agents (role 4) only see leads assigned
+   to them. Admin/superadmin/manager/executive see everything.
+═══════════════════════════════════════════════════════════════════════ */
+export const getAllLeads = async (filters = {}, requestingUser = null) => {
   const { stage, search, page = 1, limit = 200 } = filters;
-
   const query = { ...baseQuery };
 
   if (stage) query.stage = stage;
@@ -50,40 +50,21 @@ export const getAllLeads = async (filters = {}) => {
     ];
   }
 
+  if (requestingUser && requestingUser.role === ROLES.AGENT) {
+    query.assignedEmployee = requestingUser._id;
+  }
+
   const skip = (parseInt(page) - 1) * parseInt(limit);
 
   const [leads, totalResult] = await Promise.all([
     DentalLead.aggregate([
       { $match: query },
-
-      {
-        $addFields: {
-          sortOrder: {
-            $cond: [
-              { $eq: ["$nextFollowUpDate", null] },
-              1, // No follow-up -> bottom
-              0, // Has follow-up -> top
-            ],
-          },
-        },
-      },
-
-      {
-        $sort: {
-          sortOrder: 1,
-          nextFollowUpDate: 1,
-          createdAt: -1,
-        },
-      },
-
+      { $addFields: { sortOrder: { $cond: [{ $eq: ["$nextFollowUpDate", null] }, 1, 0] } } },
+      { $sort: { sortOrder: 1, nextFollowUpDate: 1, createdAt: -1 } },
       { $skip: skip },
       { $limit: parseInt(limit) },
     ]),
-
-    DentalLead.aggregate([
-      { $match: query },
-      { $count: "total" },
-    ]),
+    DentalLead.aggregate([{ $match: query }, { $count: "total" }]),
   ]);
 
   const total = totalResult.length ? totalResult[0].total : 0;
@@ -96,7 +77,6 @@ export const getAllLeads = async (filters = {}) => {
   };
 };
 
-/* ─── CREATE INQUIRY ─────────────────────────────────────────────────────── */
 /* ─── CREATE INQUIRY (auto-assigns to agent with least untouched load) ──── */
 export const createLead = async (data, email) => {
   const lead = new DentalLead({ ...data, stage: "inquiry" });
@@ -106,8 +86,6 @@ export const createLead = async (data, email) => {
       const actingEmployee = await resolveActingEmployee(email);
       await autoAssignNewLead(lead, actingEmployee);
     } catch (err) {
-      // Fail soft: never block inquiry creation because assignment couldn't
-      // resolve (e.g. no active agents yet, or acting user not found).
       console.error("Auto-assignment skipped:", err.message);
     }
   }
@@ -120,21 +98,13 @@ export const getLeadById = async (id) => {
   return DentalLead.findOne({ _id: id, ...baseQuery }).lean();
 };
 
-/* ─── UPDATE LEAD (Blocks direct pipeline/stage-critical field overrides) ── */
+/* ─── UPDATE LEAD ─────────────────────────────────────────────────────────── */
 export const updateLead = async (id, data) => {
   const {
-    stage,
-    clientId,
-    preSaleFollowups,
-    postSaleFollowups,
-    ordersList,
-    flagReason,
-    flaggedAt,
-    flaggedBy,
-    ...safeData
+    stage, clientId, preSaleFollowups, postSaleFollowups,
+    ordersList, flagReason, flaggedAt, flaggedBy, ...safeData
   } = data;
 
-  // Note: Must use findOne and save() to fire your model's pre-save hook cleanly
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
   if (!lead) throw new Error("Lead record not found");
 
@@ -147,7 +117,7 @@ export const deleteLead = async (id) => {
   return DentalLead.findOneAndUpdate({ _id: id, ...baseQuery }, { isDeleted: true }, { new: true });
 };
 
-/* ─── MOVE INQUIRY ➔ FOLLOW-UP (now accepts an optional reason) ─────────── */
+/* ─── MOVE INQUIRY ➔ FOLLOW-UP ───────────────────────────────────────────── */
 export const moveToFollowup = async (id, reason = "") => {
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
   if (!lead) throw new Error("Lead not found");
@@ -158,39 +128,33 @@ export const moveToFollowup = async (id, reason = "") => {
   return lead.save();
 };
 
-/* ─── MOVE ANY LEAD ➔ FLAG (new) ─────────────────────────────────────────── */
+/* ─── MOVE ANY LEAD ➔ FLAG ───────────────────────────────────────────────── */
 export const moveToFlag = async (id, reason, email) => {
   if (!reason || !reason.trim()) throw new Error("A reason is required to flag a lead");
 
-  const employee = await Employee.findOne(
-    { email },
-    { firstName: 1, lastName: 1 }
-  ).lean();
-
+  const employee = await Employee.findOne({ email }, { firstName: 1, lastName: 1 }).lean();
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
   if (!lead) throw new Error("Lead not found");
 
   lead.stage = "flag";
   lead.flagReason = reason.trim();
   lead.flaggedAt = new Date();
-  lead.flaggedBy = employee
-    ? `${employee.firstName || ""} ${employee.lastName || ""}`.trim()
-    : email || "";
+  lead.flaggedBy = employee ? `${employee.firstName || ""} ${employee.lastName || ""}`.trim() : email || "";
 
   return lead.save();
 };
 
-/* ─── INCREMENT CALL COUNT (new) ─────────────────────────────────────────── */
+/* ─── INCREMENT CALL COUNT — marks lead as touched ──────────────────────── */
 export const incrementCallCount = async (id) => {
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
   if (!lead) throw new Error("Lead not found");
 
   lead.callCount = (lead.callCount || 0) + 1;
-  lead.isTouched = true;  
+  lead.isTouched = true;
   return lead.save();
 };
 
-/* ─── UPDATE WHATSAPP STATUS (new — handles sent / replied / noReply) ───── */
+/* ─── UPDATE WHATSAPP STATUS ─────────────────────────────────────────────── */
 export const updateWhatsapp = async (id, whatsappData = {}) => {
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
   if (!lead) throw new Error("Lead not found");
@@ -200,15 +164,9 @@ export const updateWhatsapp = async (id, whatsappData = {}) => {
   return lead.save();
 };
 
-
-export const logFollowUp = async (
-  leadId,
-  stageType,
-  email,
-  body
-) => {
+/* ─── PRE/POST SALE FOLLOW-UP — marks lead as touched ───────────────────── */
+export const logFollowUp = async (leadId, stageType, email, body) => {
   const lead = await DentalLead.findById(leadId);
-
   if (!lead) {
     const err = new Error("Lead not found");
     err.statusCode = 404;
@@ -216,53 +174,31 @@ export const logFollowUp = async (
   }
 
   const employee = await Employee.findOne({ email });
-
   if (!employee) {
     const err = new Error("Employee not found");
     err.statusCode = 404;
     throw err;
   }
 
-  const agent =
-    `${employee.firstName || ""} ${employee.lastName || ""}`.trim() ||
-    employee.email;
-
-  /* ---------------------------------------
-      PRE SALE
-  --------------------------------------- */
+  const agent = `${employee.firstName || ""} ${employee.lastName || ""}`.trim() || employee.email;
 
   if (stageType === "pre-sale") {
-    const followup = {
-      agent,
-      employeeId: employee._id,
-      notes: body.notes,
-      hurdle: body.hurdle || "",
-      nextCallDate: body.nextCallDate,
-    };
-    lead.preSaleFollowups.push(followup);
-    lead.isTouched = true; 
+    lead.preSaleFollowups.push({
+      agent, employeeId: employee._id, notes: body.notes,
+      hurdle: body.hurdle || "", nextCallDate: body.nextCallDate,
+    });
+    lead.isTouched = true;
     await lead.save();
-
     return lead;
   }
 
-  /* ---------------------------------------
-      POST SALE
-  --------------------------------------- */
-
   if (stageType === "post-sale") {
-    const followup = {
-      agent,
-      employeeId: employee._id,
-      notes: body.notes,
-      hurdle: body.hurdle || "",
-      nextCallDate: body.nextCallDate,
-    };
-
-    lead.postSaleFollowups.push(followup);
-    lead.isTouched = true; 
+    lead.postSaleFollowups.push({
+      agent, employeeId: employee._id, notes: body.notes,
+      hurdle: body.hurdle || "", nextCallDate: body.nextCallDate,
+    });
+    lead.isTouched = true;
     await lead.save();
-
     return lead;
   }
 
@@ -320,11 +256,11 @@ export const getDashboardStats = async () => {
   return {
     ...summary,
     total: summary.inquiry + summary.followup + summary.client + summary.flag,
-    upcomingCount: upcoming.length
+    upcomingCount: upcoming.length,
   };
 };
 
-/* ─── EXCEL FILE PARSING & PIPELINE DATA INGESTION ──────────────────────── */
+/* ─── EXCEL IMPORT — inserts unassigned; distribute is a separate step ──── */
 export const importFromExcel = async (fileBuffer) => {
   const workbook = XLSX.read(fileBuffer, { type: "buffer", cellDates: true });
   const results = { inserted: 0, skipped: 0, errors: [] };
@@ -332,7 +268,6 @@ export const importFromExcel = async (fileBuffer) => {
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const matrixRows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
-
     if (!matrixRows.length) continue;
 
     for (const row of matrixRows) {
@@ -358,25 +293,25 @@ export const importFromExcel = async (fileBuffer) => {
         }
 
         await new DentalLead({
-          doctorName:       mappedData.doctorName || "",
-          clinicName:       mappedData.clinicName || "",
-          email:            mappedData.email      || "",
-          contact:          mappedData.contact,
-          city:             mappedData.city       || "",
-          state:            mappedData.state      || "",
-          address:          mappedData.address    || "",
-          enquiry:          mappedData.enquiry    || "",
-          remarks:          mappedData.remarks    || "",
-          contactBy:        mappedData.contactBy  || "",
-          stage:            "inquiry",
-          source:           "excel",
+          doctorName: mappedData.doctorName || "",
+          clinicName: mappedData.clinicName || "",
+          email: mappedData.email || "",
+          contact: mappedData.contact,
+          city: mappedData.city || "",
+          state: mappedData.state || "",
+          address: mappedData.address || "",
+          enquiry: mappedData.enquiry || "",
+          remarks: mappedData.remarks || "",
+          contactBy: mappedData.contactBy || "",
+          stage: "inquiry",
+          source: "excel",
         }).save();
 
         results.inserted++;
       } catch (err) {
         results.errors.push({
           contactId: row["CONTACT"] || row["CONTACT NO"] || "Missing identifier row",
-          error: err.message
+          error: err.message,
         });
       }
     }
@@ -385,14 +320,9 @@ export const importFromExcel = async (fileBuffer) => {
   return results;
 };
 
-
-export const logRemarkFollowUp = async (
-  leadId,
-  email,
-  body
-) => {
+/* ─── REMARK FOLLOW-UP — marks lead as touched ──────────────────────────── */
+export const logRemarkFollowUp = async (leadId, email, body) => {
   const lead = await DentalLead.findById(leadId);
-
   if (!lead) {
     const err = new Error("Lead not found");
     err.statusCode = 404;
@@ -400,25 +330,20 @@ export const logRemarkFollowUp = async (
   }
 
   const employee = await Employee.findOne({ email });
-
   if (!employee) {
     const err = new Error("Employee not found");
     err.statusCode = 404;
     throw err;
   }
 
-  const agent =
-    `${employee.firstName || ""} ${employee.lastName || ""}`.trim() ||
-    employee.email;
+  const agent = `${employee.firstName || ""} ${employee.lastName || ""}`.trim() || employee.email;
 
   const previous = lead.remarkFollowups;
-
   let round = 1;
   let touchNumber = 1;
 
   if (previous.length) {
     const last = previous[previous.length - 1];
-
     if (last.touchNumber >= 3) {
       round = last.round + 1;
       touchNumber = 1;
@@ -429,16 +354,11 @@ export const logRemarkFollowUp = async (
   }
 
   lead.remarkFollowups.push({
-    agent,
-    employeeId: employee._id,
-    callStatus: body.callStatus,
-    reason: body.reason || "",
-    nextCallDate: body.nextCallDate,
-    round,
-    touchNumber,
+    agent, employeeId: employee._id, callStatus: body.callStatus,
+    reason: body.reason || "", nextCallDate: body.nextCallDate, round, touchNumber,
   });
-  lead.isTouched = true;  
+  lead.isTouched = true;
   await lead.save();
 
-return lead;
+  return lead;
 };

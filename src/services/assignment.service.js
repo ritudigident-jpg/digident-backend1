@@ -4,6 +4,7 @@ import Employee from "../models/manage/employee.model.js";
 const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
 
 /* ─── Split an array into N nearly-equal round-robin chunks ─────────────── */
+/* Diagram: "Divide Equally (750 Each Agent)" for 3000 inquiries / 4 agents */
 const chunkEvenly = (items, n) => {
   const chunks = Array.from({ length: n }, () => []);
   items.forEach((item, idx) => chunks[idx % n].push(item));
@@ -38,14 +39,21 @@ export const resolveEmployeeByEmployeeId = async (employeeId) => {
   return employee;
 };
 
-/* ─── Fetch currently active AGENTS only (role 4) ────────────────────────── */
+/* ─── Diagram: "Count Active Agents" ─────────────────────────────────────
+   isActive: { $ne: false } treats missing field (legacy records) as active,
+   same as isActive matching true. Only role 4 (agent) counts. ────────── */
 const getActiveAgents = async (excludeMongoId = null) => {
-  const query = { role: ROLES.AGENT, isActive: true, isDeleted: false };
+  const query = {
+    role: ROLES.AGENT,
+    isDeleted: false,
+    isActive: { $ne: false },
+  };
   if (excludeMongoId) query._id = { $ne: excludeMongoId };
   return Employee.find(query).select("_id employeeId firstName lastName").lean();
 };
 
 /* ─── Map of agentMongoId -> untouched lead count (defaults to 0) ────────── */
+/* Diagram: "Assign to Agent with Least Untouched/Pending Workload" ──────── */
 const getUntouchedCountMap = async (agentMongoIds) => {
   const counts = await DentalLead.aggregate([
     {
@@ -63,6 +71,7 @@ const getUntouchedCountMap = async (agentMongoIds) => {
 };
 
 /* ─── Build bulkWrite ops assigning a batch of leads across agents ───────── */
+/* Diagram: "Assign Each Inquiry to One Agent Only" + "Assignment history is stored" */
 const buildAssignmentOps = (leads, activeAgents, actingEmployee, reasonText, assignmentType = "auto") => {
   const chunks = chunkEvenly(leads, activeAgents.length);
   const ops = [];
@@ -105,7 +114,8 @@ const buildAssignmentOps = (leads, activeAgents, actingEmployee, reasonText, ass
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   SINGLE NEW INQUIRY → assign to agent with least UNTOUCHED workload
+   Diagram: "New Inquiry Arrives" → "Assign to Agent with Least
+   Untouched/Pending Workload"
    Fails soft: if no active agents exist, lead is simply left unassigned.
 ═══════════════════════════════════════════════════════════════════════ */
 export const autoAssignNewLead = async (lead, actingEmployee) => {
@@ -136,8 +146,9 @@ export const autoAssignNewLead = async (lead, actingEmployee) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   BULK DISTRIBUTE — assigns all currently UNASSIGNED leads (e.g. after
-   an Excel import) evenly across active agents.
+   Diagram: "Import 3000 Inquiries" → "Count Active Agents" → "Divide
+   Equally" → "Assign Each Inquiry to One Agent Only"
+   Distributes all currently UNASSIGNED leads evenly across active agents.
 ═══════════════════════════════════════════════════════════════════════ */
 export const distributeUnassignedLeads = async (actingEmployee) => {
   const activeAgents = await getActiveAgents();
@@ -161,9 +172,9 @@ export const distributeUnassignedLeads = async (actingEmployee) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   REBALANCE — call after a NEW agent is added. Redistributes ONLY
-   untouched leads (system-wide) evenly across ALL active agents.
-   Touched leads are never moved by this.
+   Diagram: "New Agent Added" → "Redistribute ONLY Untouched Inquiries
+   among all active agents" → "Touched/Processed Leads remain with
+   original agent"
 ═══════════════════════════════════════════════════════════════════════ */
 export const rebalanceUntouchedLeads = async (actingEmployee) => {
   const activeAgents = await getActiveAgents();
@@ -187,9 +198,11 @@ export const rebalanceUntouchedLeads = async (actingEmployee) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   AGENT DEPARTURE — mode "transfer": move ALL of the departing agent's
-   leads (touched + untouched) to one specific agent, history preserved.
-   Both agents are identified by business `employeeId`, not Mongo _id.
+   Diagram: "Agent Leaves Company" → "Transfer to Specific Agent" branch.
+   ALL leads (touched + untouched) move to target. "Processing continues
+   from the same call count, remarks, follow-ups and next call date.
+   Nothing is reset." — we only mutate assignment fields, never
+   callCount/remarkFollowups/etc, so this holds true automatically.
 ═══════════════════════════════════════════════════════════════════════ */
 const transferAgentLeads = async (departingEmployee, targetEmployeeIdStr, actingEmployee, reason) => {
   const targetAgent = await resolveEmployeeByEmployeeId(targetEmployeeIdStr);
@@ -197,7 +210,7 @@ const transferAgentLeads = async (departingEmployee, targetEmployeeIdStr, acting
   if (targetAgent.role !== ROLES.AGENT) {
     throw new Error(`Target employee "${targetEmployeeIdStr}" is not an agent (role must be 4)`);
   }
-  if (!targetAgent.isActive) {
+  if (targetAgent.isActive === false) {
     throw new Error("Target agent is not active");
   }
   if (String(targetAgent._id) === String(departingEmployee._id)) {
@@ -222,9 +235,9 @@ const transferAgentLeads = async (departingEmployee, targetEmployeeIdStr, acting
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   AGENT DEPARTURE — mode "auto": redistribute ONLY the departing agent's
-   untouched leads among the remaining active agents. Touched leads stay
-   assigned to the departing (now inactive) employee record.
+   Diagram: "Agent Leaves Company" → "Auto Distribute" branch.
+   Only untouched leads move to remaining active agents. Touched leads
+   stay with the departing (now inactive) employee record.
 ═══════════════════════════════════════════════════════════════════════ */
 const autoDistributeDepartingAgentLeads = async (departingEmployee, actingEmployee) => {
   const remainingAgents = await getActiveAgents(departingEmployee._id);
@@ -264,8 +277,8 @@ const autoDistributeDepartingAgentLeads = async (departingEmployee, actingEmploy
   };
 };
 
-/* ─── Entry point used by the controller ─────────────────────────────────── */
-/* departingEmployeeIdStr = the business `employeeId` string from the URL param */
+/* ─── Entry point — Diagram: "Only Admin/Super Admin can perform this
+   transfer" is enforced at the controller layer via assertAdmin. ──────── */
 export const handleAgentDeparture = async (departingEmployeeIdStr, mode, options, actingEmployee) => {
   const departingEmployee = await resolveEmployeeByEmployeeId(departingEmployeeIdStr);
 
