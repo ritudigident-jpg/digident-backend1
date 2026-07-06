@@ -4,7 +4,6 @@ import Employee from "../models/manage/employee.model.js";
 import { autoAssignNewLead, resolveActingEmployee } from "./assignment.service.js";
 
 const baseQuery = { isDeleted: false };
-const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
 const norm = (s) => String(s ?? "").toLowerCase().trim().replace(/[\s_\-\/\.]+/g, " ");
 
 const COL_MAP = {
@@ -227,27 +226,22 @@ export const logOrder = async (id, data) => {
 };
 
 /* ─── FILTER UPCOMING SCHEDULE ───────────────────────────────────────────── */
-export const getUpcomingFollowUps = async (daysAhead = 7) => {
-  const startRange = new Date(); startRange.setHours(0, 0, 0, 0);
-  const endRange = new Date(startRange); endRange.setDate(endRange.getDate() + parseInt(daysAhead));
 
-  return DentalLead.find({
-    ...baseQuery,
-    stage: { $in: ["followup", "client"] },
-    nextFollowUpDate: { $gte: startRange, $lte: endRange },
-  })
-    .sort({ nextFollowUpDate: 1 })
-    .lean();
-};
 
 /* ─── GET DASHBOARD ANALYTICS ────────────────────────────────────────────── */
-export const getDashboardStats = async () => {
+
+export const getDashboardStats = async (requestingUser = null) => {
+  const scopeQuery = { ...baseQuery };
+  if (requestingUser && requestingUser.role === ROLES.AGENT) {
+    scopeQuery.assignedEmployee = requestingUser._id;
+  }
+
   const [counts, upcoming] = await Promise.all([
     DentalLead.aggregate([
-      { $match: baseQuery },
+      { $match: scopeQuery },
       { $group: { _id: "$stage", count: { $sum: 1 } } },
     ]),
-    getUpcomingFollowUps(7),
+    getUpcomingFollowUps(7, requestingUser),
   ]);
 
   const summary = { inquiry: 0, followup: 0, client: 0, flag: 0 };
@@ -258,6 +252,23 @@ export const getDashboardStats = async () => {
     total: summary.inquiry + summary.followup + summary.client + summary.flag,
     upcomingCount: upcoming.length,
   };
+};
+
+// Scope upcoming follow-ups the same way
+export const getUpcomingFollowUps = async (daysAhead = 7, requestingUser = null) => {
+  const startRange = new Date(); startRange.setHours(0, 0, 0, 0);
+  const endRange = new Date(startRange); endRange.setDate(endRange.getDate() + parseInt(daysAhead));
+
+  const query = {
+    ...baseQuery,
+    stage: { $in: ["followup", "client"] },
+    nextFollowUpDate: { $gte: startRange, $lte: endRange },
+  };
+  if (requestingUser && requestingUser.role === ROLES.AGENT) {
+    query.assignedEmployee = requestingUser._id;
+  }
+
+  return DentalLead.find(query).sort({ nextFollowUpDate: 1 }).lean();
 };
 
 /* ─── EXCEL IMPORT — inserts unassigned; distribute is a separate step ──── */

@@ -80,16 +80,24 @@ export const logOrder = asyncHandler(async (req, res) => {
 }, 400);
 
 /* ─ Dashboards & Filters ─────────────────────────────────────────────────── */
-
 export const getDashboard = asyncHandler(async (req, res) => {
-  const data = await svc.getDashboardStats();
+  let requestingUser = null;
+  if (req.user?.email) {
+    try { requestingUser = await asvc.resolveActingEmployee(req.user.email); } catch { requestingUser = null; }
+  }
+  const data = await svc.getDashboardStats(requestingUser);
   ok(res, { data });
 });
 
 export const getUpcomingFollowUps = asyncHandler(async (req, res) => {
-  const data = await svc.getUpcomingFollowUps(req.query.daysAhead);
+  let requestingUser = null;
+  if (req.user?.email) {
+    try { requestingUser = await asvc.resolveActingEmployee(req.user.email); } catch { requestingUser = null; }
+  }
+  const data = await svc.getUpcomingFollowUps(req.query.daysAhead, requestingUser);
   ok(res, { data, count: data.length });
 });
+
 
 /* ─ Excel File Import ──────────────────────────────────────────────────── */
 
