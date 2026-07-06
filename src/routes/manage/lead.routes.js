@@ -30,4 +30,9 @@ router.post("/:id/flag",      lc.moveToFlag);
 router.patch("/:id/call",     lc.incrementCallCount);
 router.patch("/:id/whatsapp", lc.updateWhatsapp);
 
+/* ── Assignment / distribution (Admin only) ─────────────────────────────── */
+router.post("/distribute",             lc.distributeUnassigned);      // after excel import
+router.post("/rebalance-untouched",    lc.rebalanceUntouched);        // after new agent added
+router.post("/agents/:employeeId/departure", lc.handleDeparture);      // { mode, targetEmployeeId?, reason? }
+
 export default router;

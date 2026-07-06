@@ -9,7 +9,7 @@ export const getAllLeads = asyncHandler(async (req, res) => {
 });
 
 export const createLead = asyncHandler(async (req, res) => {
-  const data = await svc.createLead(req.body);
+  const data = await svc.createLead(req.body, req.user?.email);
   ok(res, { data }, 201);
 }, 400);
 
@@ -121,3 +121,44 @@ export const logRemarkFollowUp = async (req, res) => {
     err(res, e.message, e.statusCode || 400);
   }
 };
+
+
+/* Placeholder admin gate — wire this to your real req.user.role field. */
+const assertAdmin = (req) => {
+  const role = req.user?.role;
+  if (role !== "admin" && role !== "superadmin") {
+    const err = new Error("Only Admin/Super Admin can perform this action");
+    err.statusCode = 403;
+    throw err;
+  }
+};
+
+// POST /leads/distribute  (bulk-assign unassigned leads, e.g. after Excel import)
+export const distributeUnassigned = asyncHandler(async (req, res) => {
+  assertAdmin(req);
+  const actingEmployee = await svc.resolveActingEmployee(req.user.email);
+  const result = await svc.distributeUnassignedLeads(actingEmployee);
+  ok(res, { data: result });
+}, 400);
+
+// POST /leads/rebalance-untouched  (call after adding a new agent)
+export const rebalanceUntouched = asyncHandler(async (req, res) => {
+  assertAdmin(req);
+  const actingEmployee = await svc.resolveActingEmployee(req.user.email);
+  const result = await svc.rebalanceUntouchedLeads(actingEmployee);
+  ok(res, { data: result });
+}, 400);
+
+// POST /leads/agents/:employeeId/departure  { mode: 'transfer'|'auto', targetEmployeeId?, reason? }
+export const handleDeparture = asyncHandler(async (req, res) => {
+  assertAdmin(req);
+  const actingEmployee = await svc.resolveActingEmployee(req.user.email);
+  const { mode, targetEmployeeId, reason } = req.body;
+  const result = await svc.handleAgentDeparture(
+    req.params.employeeId,
+    mode,
+    { targetEmployeeId, reason },
+    actingEmployee
+  );
+  ok(res, { data: result });
+}, 400);
