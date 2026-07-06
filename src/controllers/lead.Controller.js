@@ -100,3 +100,24 @@ export const importExcel = asyncHandler(async (req, res) => {
   const results = await svc.importFromExcel(req.file.buffer);
   ok(res, { data: results });
 }, 400);
+
+
+export const logRemarkFollowUp = async (req, res) => {
+  try {
+    const email = req.user?.email;
+
+    if (!email) {
+      return err(res, "Unauthorized", 401);
+    }
+
+    const data = await svc.logRemarkFollowUp(
+      req.params.id,
+      email,
+      req.body
+    );
+
+    ok(res, { data }, 201);
+  } catch (e) {
+    err(res, e.message, e.statusCode || 400);
+  }
+};

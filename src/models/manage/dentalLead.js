@@ -1,111 +1,3 @@
-// import mongoose from "mongoose";
-
-// /* ── Follow-up log entry — max 3 touches PER ROUND, then auto-rolls to next round ── */
-// const followUpSchema = new mongoose.Schema(
-//   {
-//     agent:      { type: String, required: true, trim: true },
-//     employeeId: {
-//       type: mongoose.Schema.Types.ObjectId,
-//       ref: "Employee",
-//       required: true,
-//     },
-//     /* Did the customer pick up the call? */
-//     callStatus: {
-//       type: String,
-//       required: true,
-//     },
-//     /* Optional extra detail — why not picked, what was discussed, etc. */
-//     reason:       { type: String, trim: true, default: "" },
-//     nextCallDate: { type: Date, required: true },
-//     round:        { type: Number, required: true, default: 1 }, // month cycle
-//     touchNumber:  { type: Number, required: true, min: 1, max: 3 }, // 1-3 within round
-//     loggedAt:     { type: Date, default: Date.now },
-//   },
-//   { _id: true }
-// );
-
-// /* ── WhatsApp contact sub-schema ── */
-// const whatsappSchema = new mongoose.Schema(
-//   {
-//     sent:    { type: Boolean, default: false },
-//     replied: { type: Boolean, default: false },
-//     noReply: {
-//       reason:  { type: String, trim: true, default: "" },
-//       fixDate: { type: Date, default: null },
-//     },
-//   },
-//   { _id: false }
-// );
-
-// /* ── Main DentalLead schema ── */
-// const dentalLeadSchema = new mongoose.Schema(
-//   {
-//     doctorName: { type: String, trim: true },
-//     clinicName: { type: String, trim: true, default: "" },
-//     email:      { type: String, lowercase: true, trim: true, default: "" },
-//     contact:    { type: String, trim: true },
-//     city:       { type: String, trim: true, default: "" },
-//     state:      { type: String, trim: true, default: "" },
-//     address:    { type: String, trim: true, default: "" },
-//     enquiry:    { type: String, trim: true, default: "" },
-//     remarks:    { type: String, trim: true, default: "" },
-
-//     stage: {
-//       type: String,
-//       enum: ["inquiry", "followup", "client", "flag"],
-//       default: "inquiry",
-//       index: true,
-//     },
-
-//     clientId: { type: String, trim: true, default: null, sparse: true },
-
-//     /* No length cap here anymore — rounds keep rolling monthly until converted */
-//     preSaleFollowups:  { type: [followUpSchema], default: [] },
-//     postSaleFollowups: { type: [followUpSchema], default: [] },
-
-//     whatsapp:   { type: whatsappSchema, default: () => ({}) },
-//     callCount:  { type: Number, default: 0, min: 0 },
-//     moveReason: { type: String, trim: true, default: "" },
-
-//     flagReason: { type: String, trim: true, default: "" },
-//     flaggedAt:  { type: Date, default: null },
-//     flaggedBy:  { type: String, trim: true, default: "" },
-
-//     contactBy: { type: String, trim: true, default: "" },
-
-//     source: {
-//       type: String,
-//       enum: ["manual", "excel"],
-//       default: "manual",
-//     },
-//     invoiceId: {
-//       type: mongoose.Schema.Types.ObjectId,
-//       ref: "Invoice",
-//     },
-
-//     nextFollowUpDate: { type: Date, default: null, index: 1 },
-
-//     isDeleted: { type: Boolean, default: false },
-//   },
-//   { timestamps: true }
-// );
-
-// dentalLeadSchema.pre("save", function () {
-//   const allDates = [...this.preSaleFollowups, ...this.postSaleFollowups]
-//     .map((f) => f?.nextCallDate)
-//     .filter(Boolean);
-
-//   if (allDates.length > 0) {
-//     allDates.sort((a, b) => new Date(a) - new Date(b));
-//     this.nextFollowUpDate = allDates[0];
-//   } else {
-//     this.nextFollowUpDate = null;
-//   }
-// });
-
-// export default mongoose.model("DentalLead", dentalLeadSchema);
-
-
 import mongoose from "mongoose";
 
 /* ────────────────────────────────────────────────────────────────
@@ -152,7 +44,7 @@ const remarkFollowupSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 1,
-      max: 3,
+      max: 100,
     },
 
     loggedAt: {
@@ -237,6 +129,62 @@ const whatsappSchema = new mongoose.Schema(
 );
 
 /* ────────────────────────────────────────────────────────────────
+   Assignment History
+   Records every transfer: From Agent → To Agent → By → Date → Reason
+──────────────────────────────────────────────────────────────── */
+const assignmentHistorySchema = new mongoose.Schema(
+  {
+    fromEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+    },
+
+    fromAgent: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    toEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      required: true,
+    },
+
+    toAgent: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+
+    transferredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      required: true,
+    },
+
+    transferredByName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    reason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    transferredAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: true }
+);
+
+/* ────────────────────────────────────────────────────────────────
    Dental Lead
 ──────────────────────────────────────────────────────────────── */
 const dentalLeadSchema = new mongoose.Schema(
@@ -306,6 +254,47 @@ const dentalLeadSchema = new mongoose.Schema(
       trim: true,
       default: null,
       sparse: true,
+    },
+
+    /* ──────────────────────────────────────────────
+       Lead Assignment (Ownership + Redistribution)
+    ────────────────────────────────────────────── */
+    assignedEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+      index: true,
+    },
+
+    assignedAgent: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    assignedAt: {
+      type: Date,
+      default: Date.now,
+    },
+
+    assignmentType: {
+      type: String,
+      enum: ["auto", "manual", "transfer"],
+      default: "auto",
+    },
+
+    // true as soon as first call/remark/follow-up is logged
+    // untouched leads (false) are the only ones eligible for
+    // automatic redistribution when agents are added/removed
+    isTouched: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    assignmentHistory: {
+      type: [assignmentHistorySchema],
+      default: [],
     },
 
     /* Inquiry / Follow-up stage */
