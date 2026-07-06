@@ -124,12 +124,13 @@ export const logRemarkFollowUp = async (req, res) => {
 
 
 /* Placeholder admin gate — wire this to your real req.user.role field. */
+/* Admin gate — matches your numeric role enum: 0=superadmin, 1=admin */
 const assertAdmin = (req) => {
   const role = req.user?.role;
-  if (role !== "admin" && role !== "superadmin") {
-    const err = new Error("Only Admin/Super Admin can perform this action");
-    err.statusCode = 403;
-    throw err;
+  if (role !== 0 && role !== 1) {
+    const adminErr = new Error("Only Admin/Super Admin can perform this action");
+    adminErr.statusCode = 403;
+    throw adminErr;
   }
 };
 

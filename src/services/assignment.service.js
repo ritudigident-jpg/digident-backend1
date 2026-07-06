@@ -1,6 +1,8 @@
 import DentalLead from "../models/manage/dentalLead.js";
 import Employee from "../models/manage/employee.model.js";
 
+const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
+
 /* ─── Split an array into N nearly-equal round-robin chunks ─────────────── */
 const chunkEvenly = (items, n) => {
   const chunks = Array.from({ length: n }, () => []);
@@ -12,8 +14,8 @@ const fullName = (e) => `${e?.firstName || ""} ${e?.lastName || ""}`.trim();
 
 /* ─── Resolve the logged-in user performing an assignment action ────────── */
 export const resolveActingEmployee = async (email) => {
-  const employee = await Employee.findOne({ email })
-    .select("_id firstName lastName")
+  const employee = await Employee.findOne({ email, isDeleted: false })
+    .select("_id employeeId firstName lastName role")
     .lean();
   if (!employee) {
     const err = new Error("Acting employee not found");
@@ -23,26 +25,39 @@ export const resolveActingEmployee = async (email) => {
   return employee;
 };
 
-/* ─── Fetch currently active agents ──────────────────────────────────────── */
-const getActiveAgents = async (excludeId = null) => {
-  const query = { isActive: true };
-  if (excludeId) query._id = { $ne: excludeId };
-  return Employee.find(query).select("_id firstName lastName").lean();
+/* ─── Resolve a business employeeId (string) to the Mongo document ──────── */
+export const resolveEmployeeByEmployeeId = async (employeeId) => {
+  const employee = await Employee.findOne({ employeeId, isDeleted: false })
+    .select("_id employeeId firstName lastName role isActive")
+    .lean();
+  if (!employee) {
+    const err = new Error(`Employee not found for employeeId "${employeeId}"`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return employee;
 };
 
-/* ─── Map of agentId -> untouched lead count (defaults to 0) ────────────── */
-const getUntouchedCountMap = async (agentIds) => {
+/* ─── Fetch currently active AGENTS only (role 4) ────────────────────────── */
+const getActiveAgents = async (excludeMongoId = null) => {
+  const query = { role: ROLES.AGENT, isActive: true, isDeleted: false };
+  if (excludeMongoId) query._id = { $ne: excludeMongoId };
+  return Employee.find(query).select("_id employeeId firstName lastName").lean();
+};
+
+/* ─── Map of agentMongoId -> untouched lead count (defaults to 0) ────────── */
+const getUntouchedCountMap = async (agentMongoIds) => {
   const counts = await DentalLead.aggregate([
     {
       $match: {
         isDeleted: false,
         isTouched: false,
-        assignedEmployee: { $in: agentIds },
+        assignedEmployee: { $in: agentMongoIds },
       },
     },
     { $group: { _id: "$assignedEmployee", count: { $sum: 1 } } },
   ]);
-  const map = new Map(agentIds.map((id) => [String(id), 0]));
+  const map = new Map(agentMongoIds.map((id) => [String(id), 0]));
   counts.forEach((c) => map.set(String(c._id), c.count));
   return map;
 };
@@ -56,7 +71,7 @@ const buildAssignmentOps = (leads, activeAgents, actingEmployee, reasonText, ass
   activeAgents.forEach((agent, i) => {
     const agentName = fullName(agent);
     const chunk = chunks[i];
-    summary.push({ employeeId: agent._id, agent: agentName, count: chunk.length });
+    summary.push({ employeeId: agent.employeeId, mongoId: agent._id, agent: agentName, count: chunk.length });
 
     chunk.forEach((lead) => {
       ops.push({
@@ -174,18 +189,22 @@ export const rebalanceUntouchedLeads = async (actingEmployee) => {
 /* ═══════════════════════════════════════════════════════════════════════
    AGENT DEPARTURE — mode "transfer": move ALL of the departing agent's
    leads (touched + untouched) to one specific agent, history preserved.
+   Both agents are identified by business `employeeId`, not Mongo _id.
 ═══════════════════════════════════════════════════════════════════════ */
-const transferAgentLeads = async (departingEmployeeId, targetEmployeeId, actingEmployee, reason) => {
-  const targetAgent = await Employee.findById(targetEmployeeId)
-    .select("_id firstName lastName isActive")
-    .lean();
-  if (!targetAgent) throw new Error("Target agent not found");
-  if (!targetAgent.isActive) throw new Error("Target agent is not active");
-  if (String(targetEmployeeId) === String(departingEmployeeId)) {
+const transferAgentLeads = async (departingEmployee, targetEmployeeIdStr, actingEmployee, reason) => {
+  const targetAgent = await resolveEmployeeByEmployeeId(targetEmployeeIdStr);
+
+  if (targetAgent.role !== ROLES.AGENT) {
+    throw new Error(`Target employee "${targetEmployeeIdStr}" is not an agent (role must be 4)`);
+  }
+  if (!targetAgent.isActive) {
+    throw new Error("Target agent is not active");
+  }
+  if (String(targetAgent._id) === String(departingEmployee._id)) {
     throw new Error("Target agent must be different from the departing agent");
   }
 
-  const leads = await DentalLead.find({ assignedEmployee: departingEmployeeId, isDeleted: false })
+  const leads = await DentalLead.find({ assignedEmployee: departingEmployee._id, isDeleted: false })
     .select("_id assignedEmployee assignedAgent")
     .lean();
   if (!leads.length) return { transferred: 0, targetAgent: fullName(targetAgent) };
@@ -199,7 +218,7 @@ const transferAgentLeads = async (departingEmployeeId, targetEmployeeId, actingE
   );
   await DentalLead.bulkWrite(ops);
 
-  return { transferred: leads.length, targetAgent: fullName(targetAgent) };
+  return { transferred: leads.length, targetAgent: fullName(targetAgent), targetEmployeeId: targetAgent.employeeId };
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -207,12 +226,12 @@ const transferAgentLeads = async (departingEmployeeId, targetEmployeeId, actingE
    untouched leads among the remaining active agents. Touched leads stay
    assigned to the departing (now inactive) employee record.
 ═══════════════════════════════════════════════════════════════════════ */
-const autoDistributeDepartingAgentLeads = async (departingEmployeeId, actingEmployee) => {
-  const remainingAgents = await getActiveAgents(departingEmployeeId);
+const autoDistributeDepartingAgentLeads = async (departingEmployee, actingEmployee) => {
+  const remainingAgents = await getActiveAgents(departingEmployee._id);
   if (!remainingAgents.length) throw new Error("No other active agents available to redistribute to");
 
   const untouched = await DentalLead.find({
-    assignedEmployee: departingEmployeeId,
+    assignedEmployee: departingEmployee._id,
     isTouched: false,
     isDeleted: false,
   })
@@ -220,7 +239,7 @@ const autoDistributeDepartingAgentLeads = async (departingEmployeeId, actingEmpl
     .lean();
 
   const touchedRemaining = await DentalLead.countDocuments({
-    assignedEmployee: departingEmployeeId,
+    assignedEmployee: departingEmployee._id,
     isTouched: true,
     isDeleted: false,
   });
@@ -246,13 +265,16 @@ const autoDistributeDepartingAgentLeads = async (departingEmployeeId, actingEmpl
 };
 
 /* ─── Entry point used by the controller ─────────────────────────────────── */
-export const handleAgentDeparture = async (departingEmployeeId, mode, options, actingEmployee) => {
+/* departingEmployeeIdStr = the business `employeeId` string from the URL param */
+export const handleAgentDeparture = async (departingEmployeeIdStr, mode, options, actingEmployee) => {
+  const departingEmployee = await resolveEmployeeByEmployeeId(departingEmployeeIdStr);
+
   if (mode === "transfer") {
     if (!options?.targetEmployeeId) throw new Error("targetEmployeeId is required for transfer mode");
-    return transferAgentLeads(departingEmployeeId, options.targetEmployeeId, actingEmployee, options.reason);
+    return transferAgentLeads(departingEmployee, options.targetEmployeeId, actingEmployee, options.reason);
   }
   if (mode === "auto") {
-    return autoDistributeDepartingAgentLeads(departingEmployeeId, actingEmployee);
+    return autoDistributeDepartingAgentLeads(departingEmployee, actingEmployee);
   }
   throw new Error("mode must be 'transfer' or 'auto'");
 };
