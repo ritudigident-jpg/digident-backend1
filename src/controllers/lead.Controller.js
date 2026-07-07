@@ -18,6 +18,22 @@ export const getAllLeads = asyncHandler(async (req, res) => {
 
 export const createLead = asyncHandler(async (req, res) => {
   const data = await svc.createLead(req.body, req.user?.email);
+
+  // ── Auto-distribute ────────────────────────────────────────────────
+  // Whenever a new lead is added, immediately spread any currently
+  // unassigned leads across active agents. This runs best-effort:
+  // if it fails for any reason, lead creation itself still succeeds
+  // and the error is only logged, never surfaced to the caller.
+  try {
+    let actingEmployee = null;
+    if (req.user?.email) {
+      try { actingEmployee = await asvc.resolveActingEmployee(req.user.email); } catch { actingEmployee = null; }
+    }
+    await asvc.distributeUnassignedLeads(actingEmployee);
+  } catch (err) {
+    console.error("Auto-distribute after createLead failed:", err.message);
+  }
+
   ok(res, { data }, 201);
 }, 400);
 
@@ -110,6 +126,20 @@ export const importExcel = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: "No file uploaded" });
   }
   const results = await svc.importFromExcel(req.file.buffer);
+
+  // ── Auto-distribute ────────────────────────────────────────────────
+  // A bulk import is just many new leads at once — run the same
+  // best-effort distribute pass so imported leads don't sit unassigned.
+  try {
+    let actingEmployee = null;
+    if (req.user?.email) {
+      try { actingEmployee = await asvc.resolveActingEmployee(req.user.email); } catch { actingEmployee = null; }
+    }
+    await asvc.distributeUnassignedLeads(actingEmployee);
+  } catch (err) {
+    console.error("Auto-distribute after importExcel failed:", err.message);
+  }
+
   ok(res, { data: results });
 }, 400);
 
@@ -155,3 +185,28 @@ export const handleDeparture = asyncHandler(async (req, res) => {
   );
   ok(res, { data: result });
 }, 400);
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Rebalance-on-new-agent hook — NOT wired in yet
+   ─────────────────────────────────────────────────────────────────────────
+   This controller only owns LEAD routes. Agent/employee creation lives in
+   a separate controller (the one behind AUTH_API's `/employee/...` routes,
+   e.g. employee.controller.js or auth.controller.js — not shown to me).
+
+   To make "rebalance runs automatically when a new agent is added" work,
+   add this same pattern to the END of that employee-creation handler,
+   right after the new employee document is saved successfully:
+
+     import * as asvc from "<path-to>/services/assignment.service.js";
+     ...
+     // inside e.g. createEmployee handler, after `await newEmployee.save()`:
+     try {
+       await asvc.rebalanceUntouchedLeads(null); // or resolve an acting admin if you have one
+     } catch (err) {
+       console.error("Auto-rebalance after createEmployee failed:", err.message);
+     }
+
+   Paste that controller/route file here and I'll wire it in precisely,
+   matching whatever `actingEmployee` argument shape rebalanceUntouchedLeads
+   expects.
+──────────────────────────────────────────────────────────────────────────── */
