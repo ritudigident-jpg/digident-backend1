@@ -281,7 +281,6 @@ const autoDistributeDepartingAgentLeads = async (departingEmployee, actingEmploy
    transfer" is enforced at the controller layer via assertAdmin. ──────── */
 export const handleAgentDeparture = async (departingEmployeeIdStr, mode, options, actingEmployee) => {
   const departingEmployee = await resolveEmployeeByEmployeeId(departingEmployeeIdStr);
-
   if (mode === "transfer") {
     if (!options?.targetEmployeeId) throw new Error("targetEmployeeId is required for transfer mode");
     return transferAgentLeads(departingEmployee, options.targetEmployeeId, actingEmployee, options.reason);

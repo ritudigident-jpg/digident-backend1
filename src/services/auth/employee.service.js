@@ -216,15 +216,13 @@ export const deleteEmployeeService = async(
     employeeId,
     isDeleted: false
   });
-
-  if (!employee) {
+  if (!employee){
     throw new Error("EMPLOYEE_NOT_FOUND");
   }
   const admin = await Employee.findOne({
     email: adminEmail,
     isDeleted: false
   });
-
   if (!admin){
     throw new Error("UNAUTHORIZED_ACTION");
   }
@@ -236,17 +234,14 @@ export const deleteEmployeeService = async(
     permissionAuditId: uuidv6(),
     actionBy: admin._id,
     actionByEmail: admin.email,
-
     actionFor: employee._id,
     action: employee.email,
-
     permission: permission?.toLowerCase() || "delete_employee",
     actionType: "Delete"
   });
 }catch(error){
   console.log("error in delete of employee Audit log");
 }
-
   /* ---------- SEND NOTIFICATION ---------- */
 try{
   await sendNotification({
@@ -287,9 +282,7 @@ export const updateEmployeeRoleService = async(
   if (!admin) {
     throw new Error("UNAUTHORIZED_ACTION");
   }
-
   /* Find employee */
-
   const employee = await Employee.findOne({
     email: employeeEmail,
     isDeleted: false
@@ -297,24 +290,18 @@ export const updateEmployeeRoleService = async(
   if (!employee) {
     throw new Error("EMPLOYEE_NOT_FOUND");
   }
-
   /* Update role */
   const oldRole = employee.role
-
   employee.role = role;
-
   await employee.save();
-
   /* Save permission audit */
 try{
   await PermissionAudit.create({
     permissionAuditId: uuidv6(),
     actionBy: admin._id,
     actionByEmail: admin.email,
-
     actionFor: employee._id,
     action: employee.email,
-
     permission: permission?.toLowerCase(),
     actionType: "Update"
   });
@@ -327,24 +314,17 @@ try{
     await sendNotification({
       sender: admin._id,
       permission: "auth.account.update",
-  
       title: "Employee Role Updated",
-  
       message: `${employee.firstName} ${employee.lastName} role updated from ${oldRole} to ${role}`,
-  
       type: "EMPLOYEE_ROLE_UPDATED",
-  
       entityId: employee._id,
       entityModel: "Employee",
-  
       metadata: {
         employeeId: employee.employeeId,
         employeeName: `${employee.firstName} ${employee.lastName}`,
         employeeEmail: employee.email,
-  
         oldRole,
         newRole: role,
-
       updatedBy: `${admin.firstName} ${admin.lastName}`,
       updatedByEmail: admin.email
     }
@@ -380,5 +360,4 @@ export const refreshEmployeeAccessTokenService = async (refreshToken) => {
   }
   const { accessToken } = generateTokens(employee);
   return accessToken;
-
 };
