@@ -49,9 +49,9 @@ export const getAllLeads = async (filters = {}, requestingUser = null) => {
     ];
   }
 
-  if (requestingUser && requestingUser.role === ROLES.AGENT) {
-    query.assignedEmployee = requestingUser._id;
-  }
+  // if (requestingUser && requestingUser.role === ROLES.AGENT) {
+  //   query.assignedEmployee = requestingUser._id;
+  // }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -232,9 +232,9 @@ export const logOrder = async (id, data) => {
 
 export const getDashboardStats = async (requestingUser = null) => {
   const scopeQuery = { ...baseQuery };
-  if (requestingUser && requestingUser.role === ROLES.AGENT) {
-    scopeQuery.assignedEmployee = requestingUser._id;
-  }
+  // if (requestingUser && requestingUser.role === ROLES.AGENT) {
+  //   scopeQuery.assignedEmployee = requestingUser._id;
+  // }
 
   const [counts, upcoming] = await Promise.all([
     DentalLead.aggregate([
@@ -264,9 +264,9 @@ export const getUpcomingFollowUps = async (daysAhead = 7, requestingUser = null)
     stage: { $in: ["followup", "client"] },
     nextFollowUpDate: { $gte: startRange, $lte: endRange },
   };
-  if (requestingUser && requestingUser.role === ROLES.AGENT) {
-    query.assignedEmployee = requestingUser._id;
-  }
+  // if (requestingUser && requestingUser.role === ROLES.AGENT) {
+  //   query.assignedEmployee = requestingUser._id;
+  // }
 
   return DentalLead.find(query).sort({ nextFollowUpDate: 1 }).lean();
 };
