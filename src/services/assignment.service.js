@@ -42,9 +42,10 @@ export const resolveEmployeeByEmployeeId = async (employeeId) => {
 /* ─── Diagram: "Count Active Agents" ─────────────────────────────────────
    isActive: { $ne: false } treats missing field (legacy records) as active,
    same as isActive matching true. Only role 4 (agent) counts. ────────── */
+
 const getActiveAgents = async (excludeMongoId = null) => {
   const query = {
-    role: ROLES.AGENT,
+    role: ROLES.AGENT,        // role = 4
     isDeleted: false,
     isActive: { $ne: false },
   };
@@ -291,3 +292,5 @@ export const handleAgentDeparture = async (departingEmployeeIdStr, mode, options
   }
   throw new Error("mode must be 'transfer' or 'auto'");
 };
+
+
