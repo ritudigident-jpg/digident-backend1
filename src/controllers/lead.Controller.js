@@ -2,6 +2,9 @@ import * as svc from "../services/lead.service.js";
 import * as asvc from "../services/assignment.service.js";
 import { ok, asyncHandler } from "../helpers/error.helper.js";
 
+// constants/roles.js
+export const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
+
 /* ─ CRUD Operations ──────────────────────────────────────────────────────── */
 
 export const getAllLeads = asyncHandler(async (req, res) => {
@@ -75,7 +78,7 @@ export const logOrder = asyncHandler(async (req, res) => {
 
 export const logRemarkFollowUp = asyncHandler(async (req, res) => {
   const email = req.user?.email;
-  if (!email) return err(res, "Unauthorized", 401);
+  if (!email) return res.status(401).json({ success: false, message: "Unauthorized" }); // ← FIX
   const data = await svc.logRemarkFollowUp(req.params.id, email, req.body);
   ok(res, { data }, 201);
 }, 400);
