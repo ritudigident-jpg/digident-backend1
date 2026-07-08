@@ -163,8 +163,8 @@ const assertAdmin = async (req) => {
 };
 
 export const distributeUnassigned = asyncHandler(async (req, res) => {
-  const actingEmployee = await assertAdmin(req);
-  const result = await asvc.distributeUnassignedLeads(actingEmployee);
+  // const actingEmployee = await assertAdmin(req);
+  const result = await asvc.distributeUnassignedLeads(req);
   ok(res, { data: result });
 }, 400);
 
