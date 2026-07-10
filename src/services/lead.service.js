@@ -418,8 +418,20 @@ export const getAgentsOverview = async () => {
    viewing that agent's complete lead data — every stage, every touch.
 ─────────────────────────────────────────────────────────────────────────── */
 export const getLeadsByAgent = async (employeeId, filters = {}) => {
+  // Guard against malformed IDs (aggregate would otherwise throw a
+  // confusing "Cast to ObjectId failed" error, or silently return []
+  // depending on the exact bad input).
+  if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+    const err = new Error("Invalid agent id");
+    err.statusCode = 400;
+    throw err;
+  }
+  const agentObjectId = new mongoose.Types.ObjectId(employeeId);
+ 
   const { stage, search, page = 1, limit = 200 } = filters;
-  const query = { ...baseQuery, assignedEmployee: employeeId };
+ 
+  // ← THE FIX: use agentObjectId, not the raw string employeeId
+  const query = { ...baseQuery, assignedEmployee: agentObjectId };
  
   if (stage) query.stage = stage;
  
@@ -444,6 +456,9 @@ export const getLeadsByAgent = async (employeeId, filters = {}) => {
       { $limit: parseInt(limit) },
     ]),
     DentalLead.aggregate([{ $match: query }, { $count: "total" }]),
+    // Employee.findById is a normal Mongoose query method, so it casts
+    // the string employeeId to ObjectId automatically — this part was
+    // never the problem.
     Employee.findById(employeeId).select("_id employeeId firstName lastName email role isActive").lean(),
   ]);
  
@@ -463,3 +478,4 @@ export const getLeadsByAgent = async (employeeId, filters = {}) => {
     totalPages: Math.ceil(total / parseInt(limit)),
   };
 };
+ 
