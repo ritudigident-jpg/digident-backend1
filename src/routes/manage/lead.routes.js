@@ -30,6 +30,9 @@ router.post("/distribute",             lc.distributeUnassigned);
 router.post("/rebalance-untouched",    lc.rebalanceUntouched);
 router.post("/agents/:employeeId/departure", lc.handleDeparture);
 
+router.get("/admin/agents-overview",        lc.getAgentsOverview);
+router.get("/admin/by-agent/:employeeId",   lc.getLeadsByAgent);
+
 router.get("/debug/unassigned-count", auth, async (req, res) => {
   const count = await dentalLead.countDocuments({ assignedEmployee: null, isDeleted: false });
   const total = await dentalLead.countDocuments({ isDeleted: false });

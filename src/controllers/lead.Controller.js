@@ -210,3 +210,15 @@ export const handleDeparture = asyncHandler(async (req, res) => {
    matching whatever `actingEmployee` argument shape rebalanceUntouchedLeads
    expects.
 ──────────────────────────────────────────────────────────────────────────── */
+
+export const getAgentsOverview = asyncHandler(async (req, res) => {
+  await assertAdmin(req);
+  const data = await svc.getAgentsOverview();
+  ok(res, { data });
+});
+ 
+export const getLeadsByAgent = asyncHandler(async (req, res) => {
+  await assertAdmin(req);
+  const result = await svc.getLeadsByAgent(req.params.employeeId, req.query);
+  ok(res, result);
+}, 400);

@@ -374,3 +374,92 @@ export const logRemarkFollowUp = async (leadId, email, body) => {
 
   return lead;
 };
+
+
+export const getAgentsOverview = async () => {
+  const agents = await Employee.find({ role: ROLES.AGENT, isDeleted: false })
+    .select("_id employeeId firstName lastName email isActive")
+    .lean();
+ 
+  const counts = await DentalLead.aggregate([
+    { $match: baseQuery },
+    {
+      $group: {
+        _id: { agent: "$assignedEmployee", stage: "$stage" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+ 
+  const byAgent = {};
+  counts.forEach((c) => {
+    const agentId = c._id.agent ? String(c._id.agent) : "unassigned";
+    if (!byAgent[agentId]) {
+      byAgent[agentId] = { inquiry: 0, followup: 0, client: 0, flag: 0, total: 0 };
+    }
+    if (c._id.stage in byAgent[agentId]) byAgent[agentId][c._id.stage] = c.count;
+    byAgent[agentId].total += c.count;
+  });
+ 
+  const unassignedCounts = byAgent["unassigned"] || { inquiry: 0, followup: 0, client: 0, flag: 0, total: 0 };
+ 
+  return {
+    agents: agents.map((a) => ({
+      ...a,
+      counts: byAgent[String(a._id)] || { inquiry: 0, followup: 0, client: 0, flag: 0, total: 0 },
+    })),
+    unassigned: unassignedCounts,
+  };
+};
+ 
+/* ─── ADMIN: LEADS BY AGENT — full lead list for one specific agent, by ID ──
+   Unlike getAllLeads (which self-scopes an AGENT caller to their own leads),
+   this is explicitly for an admin/superadmin picking *any* agent's ID and
+   viewing that agent's complete lead data — every stage, every touch.
+─────────────────────────────────────────────────────────────────────────── */
+export const getLeadsByAgent = async (employeeId, filters = {}) => {
+  const { stage, search, page = 1, limit = 200 } = filters;
+  const query = { ...baseQuery, assignedEmployee: employeeId };
+ 
+  if (stage) query.stage = stage;
+ 
+  if (search) {
+    query.$or = [
+      { doctorName: new RegExp(search, "i") },
+      { clinicName: new RegExp(search, "i") },
+      { city: new RegExp(search, "i") },
+      { contact: new RegExp(search, "i") },
+      { remarks: new RegExp(search, "i") },
+    ];
+  }
+ 
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+ 
+  const [leads, totalResult, agent] = await Promise.all([
+    DentalLead.aggregate([
+      { $match: query },
+      { $addFields: { sortOrder: { $cond: [{ $eq: ["$nextFollowUpDate", null] }, 1, 0] } } },
+      { $sort: { sortOrder: 1, nextFollowUpDate: 1, createdAt: -1 } },
+      { $skip: skip },
+      { $limit: parseInt(limit) },
+    ]),
+    DentalLead.aggregate([{ $match: query }, { $count: "total" }]),
+    Employee.findById(employeeId).select("_id employeeId firstName lastName email role isActive").lean(),
+  ]);
+ 
+  if (!agent) {
+    const err = new Error("Agent not found");
+    err.statusCode = 404;
+    throw err;
+  }
+ 
+  const total = totalResult.length ? totalResult[0].total : 0;
+ 
+  return {
+    agent,
+    leads,
+    total,
+    page: parseInt(page),
+    totalPages: Math.ceil(total / parseInt(limit)),
+  };
+};
