@@ -1268,3 +1268,53 @@ export const createManualOrder = async (req, res) => {
     return handleError(res, error);
   }
 };
+
+
+/**
+ * @function createManualReturn
+ *
+ * @description
+ * Records a return handled entirely offline — e.g. a patient/customer
+ * physically returns a product at the clinic/store counter. Skips the
+ * pending → approval lifecycle used by the app-based return flow: stock
+ * is restored and the order updated in a single step, since staff is
+ * confirming the return in person.
+ *
+ * body: {
+ *   orderId: string,
+ *   returnItems: [{ productId, variantId, quantity, reason? }],
+ *   refundNow: boolean,               // true = refund handed over immediately (cash/UPI etc)
+ *   refundMethod?: "cash" | "upi" | "bank_transfer" | "card" | "other", // required if refundNow
+ *   refundReference?: string,
+ *   notes?: string
+ * }
+ *
+ * @response
+ * 201 { success: true, message: "Manual return recorded successfully", data: {...} }
+ */
+export const createManualReturn = async (req, res) => {
+  try {
+    const { orderId, returnItems, refundNow } = req.body;
+
+    if (!orderId) {
+      return sendError(res, {
+        message: "orderId is required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+    if (!Array.isArray(returnItems) || returnItems.length === 0) {
+      return sendError(res, {
+        message: "returnItems are required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+
+    const data = await createManualReturnService(req.body, req.user);
+
+    return sendSuccess(res, data, 201, "Manual return recorded successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};

@@ -2490,3 +2490,261 @@ export const createManualOrderService = async (data, currentUser) => {
 
   return order;
 };
+
+
+export const createManualReturnService = async (data, currentUser) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { orderId, returnItems, refundNow, refundMethod, refundReference, notes } = data;
+
+    /* ================= EMPLOYEE ================= */
+    const employee = await Employee.findOne({ email: currentUser.email }).session(session);
+    if (!employee) {
+      const error = new Error("Employee not found");
+      error.statusCode = 404;
+      error.errorCode = "EMPLOYEE_NOT_FOUND";
+      throw error;
+    }
+
+    /* ================= ORDER ================= */
+    const order = await Order.findOne({ orderId }).populate("user").session(session);
+    if (!order) {
+      const error = new Error("Order not found");
+      error.statusCode = 404;
+      error.errorCode = "ORDER_NOT_FOUND";
+      throw error;
+    }
+
+    const allowedStatuses = ["placed", "packed", "confirmed", "shipped", "delivered", "partial_returned"];
+    if (!allowedStatuses.includes(order.orderStatus)) {
+      const error = new Error(
+        `Order cannot be returned. Current status: ${order.orderStatus}`
+      );
+      error.statusCode = 400;
+      error.errorCode = "INVALID_ORDER_STATE";
+      throw error;
+    }
+
+    if (!Array.isArray(returnItems) || returnItems.length === 0) {
+      const error = new Error("returnItems are required");
+      error.statusCode = 400;
+      error.errorCode = "VALIDATION_ERROR";
+      throw error;
+    }
+
+    /* ================= VALIDATE + RESTORE STOCK ================= */
+    const validatedItems = [];
+    const stockProducts = [];
+    let refundableAmount = 0;
+
+    for (const item of returnItems) {
+      const { productId, variantId, quantity, reason } = item;
+      if (!productId || !variantId || !quantity || Number(quantity) <= 0) {
+        const error = new Error("Invalid return item data");
+        error.statusCode = 400;
+        error.errorCode = "INVALID_ITEM_DATA";
+        throw error;
+      }
+
+      const orderItem = order.items.find(
+        (o) =>
+          o.productId?.toString() === productId?.toString() &&
+          o.variantId?.toString() === variantId?.toString()
+      );
+      if (!orderItem) {
+        const error = new Error(`Product not found in order: ${productId}`);
+        error.statusCode = 404;
+        error.errorCode = "ITEM_NOT_IN_ORDER";
+        throw error;
+      }
+
+      const availableQuantity =
+        Number(orderItem.quantity) - Number(orderItem.returnedQuantity || 0);
+
+      if (Number(quantity) > availableQuantity) {
+        const error = new Error(
+          `Return quantity exceeds available quantity for ${orderItem.productName} (available: ${availableQuantity})`
+        );
+        error.statusCode = 400;
+        error.errorCode = "QUANTITY_EXCEEDED";
+        throw error;
+      }
+
+      if (orderItem.price == null || Number(orderItem.price) <= 0) {
+        const error = new Error(`Invalid price found in order for ${orderItem.productName}`);
+        error.statusCode = 400;
+        error.errorCode = "INVALID_PRICE";
+        throw error;
+      }
+
+      /* ---------- RESTORE PRODUCT STOCK ---------- */
+      const product = await Product.findOne({ productId, status: "active" }).session(session);
+      if (!product) {
+        const error = new Error(`Product not found: ${productId}`);
+        error.statusCode = 404;
+        error.errorCode = "PRODUCT_NOT_FOUND";
+        throw error;
+      }
+
+      if (product.stockType === "PRODUCT") {
+        product.productStock += Number(quantity);
+      } else {
+        const variant = product.variants.find((v) => v.variantId === variantId);
+        if (!variant) {
+          const error = new Error(`Variant not found: ${variantId}`);
+          error.statusCode = 404;
+          error.errorCode = "VARIANT_NOT_FOUND";
+          throw error;
+        }
+        variant.variantStock += Number(quantity);
+      }
+      await product.save({ session });
+
+      /* ---------- UPDATE ORDER ITEM ---------- */
+      orderItem.returnedQuantity = Number(orderItem.returnedQuantity || 0) + Number(quantity);
+
+      refundableAmount += Number(orderItem.price) * Number(quantity);
+      stockProducts.push({ productId, variantId, quantity: Number(quantity) });
+      validatedItems.push({
+        productId,
+        variantId,
+        quantity: Number(quantity),
+        price: Number(orderItem.price),
+        reason: reason || "Manual return",
+      });
+    }
+
+    /* ================= RECORD RETURN REQUEST (pre-approved) ================= */
+    const requestId = uuidv6();
+    order.returnRequests.push({
+      requestId,
+      items: validatedItems,
+      status: "approved",
+      isManual: true,
+      processedBy: employee._id,
+      requestedAt: new Date(),
+      processedAt: new Date(),
+    });
+
+    /* ================= ORDER STATUS ================= */
+    const totalOrdered = order.items.reduce((sum, i) => sum + i.quantity + (i.returnedQuantity || 0) - (i.returnedQuantity || 0), 0);
+    const remainingQuantity = order.items.reduce((sum, i) => sum + i.quantity, 0) -
+      order.items.reduce((sum, i) => sum + (i.returnedQuantity || 0), 0) +
+      order.items.reduce((sum, i) => sum + (i.returnedQuantity || 0), 0); // kept explicit below instead
+
+    const totalActiveQty = order.items.reduce(
+      (sum, i) => sum + (Number(i.quantity) - Number(i.returnedQuantity || 0)),
+      0
+    );
+    const totalReturnedQty = order.items.reduce(
+      (sum, i) => sum + Number(i.returnedQuantity || 0),
+      0
+    );
+
+    order.orderStatus = totalActiveQty === 0 && totalReturnedQty > 0 ? "returned" : "partial_returned";
+
+    /* ================= REFUND HANDLING ================= */
+    if (refundNow) {
+      const allowedMethods = ["cash", "upi", "bank_transfer", "card", "other"];
+      if (!refundMethod || !allowedMethods.includes(refundMethod)) {
+        const error = new Error(
+          `refundMethod is required and must be one of: ${allowedMethods.join(", ")} when refundNow is true`
+        );
+        error.statusCode = 400;
+        error.errorCode = "INVALID_REFUND_METHOD";
+        throw error;
+      }
+
+      const alreadyRefunded = Number(order.partialRefundAmount || 0);
+      const newTotalRefunded = alreadyRefunded + refundableAmount;
+
+      order.partialRefundAmount = newTotalRefunded;
+      order.paymentStatus =
+        newTotalRefunded >= Number(order.grandTotal) ? "refunded" : "partial_refunded";
+      order.refundedAt = new Date();
+      order.refundHistory = order.refundHistory || [];
+      order.refundHistory.push({
+        refundId: `MANUAL-${uuidv6()}`,
+        amount: refundableAmount,
+        refundedBy: employee.email,
+        refundedAt: new Date(),
+        refundStatus: "processed",
+        method: refundMethod,
+      });
+    } else {
+      order.paymentStatus = "refund_pending";
+    }
+
+    await order.save({ session });
+
+    /* ================= STOCK AUDIT LOG ================= */
+    if (stockProducts.length > 0) {
+      await StockAuditLog.create(
+        [{ orderId: order.orderId, action: "add", products: stockProducts, time: new Date() }],
+        { session }
+      );
+    }
+
+    /* ================= PERMISSION AUDIT ================= */
+    await PermissionAudit.create(
+      [{
+        permissionAuditId: uuidv6(),
+        actionBy: employee._id,
+        actionByEmail: employee.email,
+        actionFor: order._id,
+        actionForEmail: order.user?.email,
+        permission: "manual_return_create",
+        action: "create",
+        meta: {
+          orderId: order.orderId,
+          requestId,
+          refundableAmount,
+          refundNow,
+          notes: notes || null,
+        },
+      }],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    /* ================= NOTIFICATION (post-commit) ================= */
+    try {
+      await sendNotification({
+        sender: employee._id,
+        permission: "sales.order.update",
+        title: "Manual Return Recorded",
+        message: `Manual return recorded for order ${order.orderId} by ${employee.email}`,
+        type: "ORDER_RETURN_RECORDED",
+        entityId: order._id,
+        entityModel: "Order",
+        metadata: {
+          orderId: order.orderId,
+          requestId,
+          refundableAmount,
+          refundNow,
+          createdBy: employee.email,
+        },
+      });
+    } catch (err) {
+      console.error("Notification failed on manual return:", err.message);
+    }
+
+    return {
+      orderId: order.orderId,
+      requestId,
+      orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+      refundableAmount,
+      refundProcessed: !!refundNow,
+      items: validatedItems,
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};

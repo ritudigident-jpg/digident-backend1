@@ -195,6 +195,12 @@ const orderSchema = new mongoose.Schema(
           enum: ["pending", "approved", "rejected"],
           default: "pending",
         },
+        isManual: { type: Boolean, default: false },  
+        processedBy: {                                 
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Employee",
+          default: null,
+        },
         requestedAt: {
           type: Date,
           default: Date.now,
@@ -227,6 +233,7 @@ const orderSchema = new mongoose.Schema(
         refundedBy: String,
         refundedAt: Date,
         refundStatus: String,
+        method: { type: String, default: null },
       },
     ],
     razorpayOrderId: { type: String, default: null },
