@@ -2099,3 +2099,394 @@ export const updateCourierDetailsService = async (data) => {
     updatedAt: order.statusUpdatedAt,
   };
 };
+
+
+export const createManualOrderService = async (data, currentUser) => {
+  /* ================= EMPLOYEE ================= */
+  const employee = await Employee.findOne({ email: currentUser.email });
+  if (!employee) {
+    const error = new Error("Employee not found");
+    error.statusCode = 404;
+    error.errorCode = "EMPLOYEE_NOT_FOUND";
+    throw error;
+  }
+
+  const {
+    userId,
+    userEmail,
+    userPhone,
+    items: rawItems,
+    addressId,
+    shippingAddress: manualShippingAddress,
+    billingAddress: manualBillingAddress,
+    organizationName,
+    gstNumber,
+    gstAmount = 0,
+    gstPercentage = 0,
+    discount = 0,
+    shippingCharge = 0,
+    couponId,
+    paymentStatus,
+    paymentMethod,
+    paymentReference,
+    notes,
+  } = data;
+
+  /* ================= VALIDATE PAYMENT STATUS ================= */
+  const allowedPaymentStatuses = ["paid", "pending"];
+  if (!paymentStatus || !allowedPaymentStatuses.includes(paymentStatus)) {
+    const error = new Error(
+      `paymentStatus must be one of: ${allowedPaymentStatuses.join(", ")}`
+    );
+    error.statusCode = 400;
+    error.errorCode = "INVALID_PAYMENT_STATUS";
+    throw error;
+  }
+
+  if (paymentStatus === "paid") {
+    const allowedMethods = ["cash", "upi", "bank_transfer", "cheque", "card", "other"];
+    if (!paymentMethod || !allowedMethods.includes(paymentMethod)) {
+      const error = new Error(
+        `paymentMethod is required and must be one of: ${allowedMethods.join(", ")} when paymentStatus is "paid"`
+      );
+      error.statusCode = 400;
+      error.errorCode = "INVALID_PAYMENT_METHOD";
+      throw error;
+    }
+  }
+
+  /* ================= RESOLVE CUSTOMER ================= */
+  let user = null;
+  if (userId) {
+    user = await User.findById(userId);
+  } else if (userEmail) {
+    user = await User.findOne({ email: userEmail.toLowerCase().trim() });
+  } else if (userPhone) {
+    user = await User.findOne({ phone: userPhone.trim() });
+  }
+
+  if (!user) {
+    const error = new Error(
+      "Customer not found. Provide a valid userId, userEmail, or userPhone for an existing registered user."
+    );
+    error.statusCode = 404;
+    error.errorCode = "USER_NOT_FOUND";
+    throw error;
+  }
+
+  /* ================= ITEMS ================= */
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    const error = new Error("items are required");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_ITEMS";
+    throw error;
+  }
+
+  let subtotal = 0;
+  const items = [];
+
+  for (const item of rawItems) {
+    const { productId, variantId, quantity } = item;
+    if (!productId || !variantId || !quantity || Number(quantity) <= 0) {
+      const error = new Error("Invalid item data");
+      error.statusCode = 400;
+      error.errorCode = "INVALID_ITEM_DATA";
+      throw error;
+    }
+
+    const product = await Product.findOne({ productId, status: "active" })
+      .populate("category", "name");
+
+    if (!product) {
+      const error = new Error(`Product unavailable: ${productId}`);
+      error.statusCode = 404;
+      error.errorCode = "PRODUCT_NOT_FOUND";
+      throw error;
+    }
+
+    const variant = product.variants.find(
+      (v) => v?.variantId?.toString() === variantId?.toString()
+    );
+    if (!variant) {
+      const error = new Error(`Variant unavailable: ${variantId}`);
+      error.statusCode = 404;
+      error.errorCode = "VARIANT_NOT_FOUND";
+      throw error;
+    }
+
+    const availableStock = getStock(product, variantId);
+    if (availableStock < Number(quantity)) {
+      const error = new Error(
+        `Only ${availableStock} item(s) available for ${product.name}`
+      );
+      error.statusCode = 400;
+      error.errorCode = "INSUFFICIENT_STOCK";
+      throw error;
+    }
+
+    const itemPrice = resolvePrice(product, variant);
+    if (Number.isNaN(Number(itemPrice)) || Number(itemPrice) <= 0) {
+      const error = new Error(`Invalid product price for ${product.name}`);
+      error.statusCode = 400;
+      error.errorCode = "INVALID_PRICE";
+      throw error;
+    }
+
+    const resolvedImages = resolveImages(product, variant);
+    const primaryImage = resolvedImages?.[0]?.url || resolvedImages?.[0] || "";
+
+    const itemTotal = Number(itemPrice) * Number(quantity);
+    subtotal += itemTotal;
+
+    const attrObj = {};
+    if (Array.isArray(variant.attributes)) {
+      for (const attr of variant.attributes) {
+        if (attr?.key) attrObj[attr.key] = attr.value;
+      }
+    }
+
+    items.push({
+      productId,
+      variantId,
+      sku: variant.sku || product.sku || "",
+      productName: product.name || "",
+      variantName: variant.name || "",
+      categoryName: product.category?.name || "",
+      price: Number(itemPrice),
+      quantity: Number(quantity),
+      attributes: attrObj,
+      image: primaryImage,
+      _product: product, // kept only for stock deduction below, stripped before save
+    });
+  }
+
+  /* ================= ADDRESS ================= */
+  let shippingAddress;
+  if (addressId) {
+    const possibleAddressSources = [
+      user.addresses,
+      user.shippingAddress,
+      user.shippingAddresses,
+      user.address,
+    ];
+    let addressList = [];
+    for (const source of possibleAddressSources) {
+      if (Array.isArray(source) && source.length > 0) {
+        addressList = source;
+        break;
+      }
+    }
+    const selectedAddress = addressList.find(
+      (addr) =>
+        addr?.addressId?.toString() === addressId?.toString() ||
+        addr?._id?.toString() === addressId?.toString()
+    );
+    if (!selectedAddress) {
+      const error = new Error("Address not found for this customer");
+      error.statusCode = 404;
+      error.errorCode = "ADDRESS_NOT_FOUND";
+      throw error;
+    }
+    shippingAddress = {
+      fullName:
+        selectedAddress.fullName ||
+        `${selectedAddress.firstName || ""} ${selectedAddress.lastName || ""}`.trim(),
+      phone: selectedAddress.phone || "",
+      street: selectedAddress.street || "",
+      area: selectedAddress.area || "",
+      city: selectedAddress.city || "",
+      state: selectedAddress.state || "",
+      country: selectedAddress.country || "",
+      pincode: selectedAddress.pincode || "",
+    };
+  } else if (manualShippingAddress && typeof manualShippingAddress === "object") {
+    shippingAddress = manualShippingAddress;
+  } else {
+    const error = new Error("addressId or shippingAddress is required");
+    error.statusCode = 400;
+    error.errorCode = "ADDRESS_REQUIRED";
+    throw error;
+  }
+
+  const requiredAddrFields = [
+    "fullName", "phone", "street", "area", "city", "state", "country", "pincode",
+  ];
+  for (const field of requiredAddrFields) {
+    if (!shippingAddress[field]) {
+      const error = new Error(`shippingAddress.${field} is required`);
+      error.statusCode = 400;
+      error.errorCode = "INVALID_ADDRESS";
+      throw error;
+    }
+  }
+
+  const billingAddress = manualBillingAddress || shippingAddress;
+
+  /* ================= CALCULATION ================= */
+  const finalDiscount = Math.max(Number(discount) || 0, 0);
+  let finalShippingCharge = Math.max(Number(shippingCharge) || 0, 0);
+  let appliedCoupon = null;
+
+  if (couponId) {
+    const coupon = await Coupon.findOne({ couponId }).lean();
+    if (!coupon) {
+      const error = new Error("Invalid coupon");
+      error.statusCode = 400;
+      error.errorCode = "INVALID_COUPON";
+      throw error;
+    }
+    if (coupon.couponType === "FREESHIP") finalShippingCharge = 0;
+    appliedCoupon = {
+      couponRef: coupon._id,
+      couponId: coupon.couponId,
+      code: coupon.code,
+      couponType: coupon.couponType,
+      discountAmount: finalDiscount,
+      freeShipping: coupon.couponType === "FREESHIP",
+    };
+  }
+
+  const grandTotal = Math.max(subtotal + finalShippingCharge - finalDiscount, 0);
+  if (grandTotal <= 0) {
+    const error = new Error("Invalid order amount");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_ORDER_AMOUNT";
+    throw error;
+  }
+
+  /* ================= CREATE ORDER ================= */
+  const orderId = `ORD-${uuidv6()}`;
+  const now = new Date();
+
+  const order = await Order.create({
+    orderId,
+    user: user._id,
+    items: items.map(({ _product, ...rest }) => rest), // strip helper field
+    shippingCharge: finalShippingCharge,
+    grandTotal,
+    coupon: appliedCoupon,
+    billingAddress,
+    shippingAddress,
+    organizationName: organizationName || null,
+    gstAmount: Number(gstAmount) || 0,
+    gstPercentage: Number(gstPercentage) || 0,
+    gstNumber: gstNumber || null,
+    paymentMode: "MANUAL",
+    paymentStatus,
+    orderStatus: "placed",
+    isManualOrder: true,
+    manualPaymentMethod: paymentStatus === "paid" ? paymentMethod : null,
+    manualPaymentReference: paymentReference || null,
+    manualOrderNotes: notes || null,
+    createdBy: employee._id,
+    paidAt: paymentStatus === "paid" ? now : null,
+    statusUpdatedAt: now,
+  });
+
+  /* ================= STOCK DEDUCTION ================= */
+  const lowStockProducts = [];
+  const deductedProducts = [];
+
+  for (const item of items) {
+    const product = item._product;
+    const variant = product.variants.find(
+      (v) => v.variantId === item.variantId
+    );
+
+    if (product.stockType === "PRODUCT") {
+      product.productStock -= item.quantity;
+      if (product.productStock < 50) {
+        lowStockProducts.push({
+          productName: product.name,
+          variantName: "-",
+          stockLeft: product.productStock,
+        });
+      }
+    } else {
+      variant.variantStock -= item.quantity;
+      if (variant.variantStock < 50) {
+        lowStockProducts.push({
+          productName: product.name,
+          variantName: variant.name,
+          stockLeft: variant.variantStock,
+        });
+      }
+    }
+
+    deductedProducts.push({
+      productId: item.productId,
+      variantId: item.variantId,
+      quantity: item.quantity,
+    });
+
+    await product.save();
+  }
+
+  if (deductedProducts.length > 0) {
+    await StockAuditLog.create({
+      orderId: order.orderId,
+      action: "deduct",
+      products: deductedProducts,
+    });
+  }
+
+  /* ================= USER ORDER HISTORY ================= */
+  user.orderHistory = user.orderHistory || [];
+  user.orderHistory.push({ orderId: order._id });
+  await user.save();
+
+  /* ================= AUDIT LOG ================= */
+  await PermissionAudit.create({
+    permissionAuditId: uuidv6(),
+    actionBy: employee._id,
+    actionByEmail: employee.email,
+    actionFor: order._id,
+    actionForEmail: user.email,
+    permission: "manual_order_create",
+    action: "create",
+    meta: {
+      orderId: order.orderId,
+      grandTotal: order.grandTotal,
+      paymentStatus: order.paymentStatus,
+    },
+  });
+
+  /* ================= NOTIFICATION ================= */
+  try {
+    await sendNotification({
+      sender: employee._id,
+      permission: "sales.order.update",
+      title: "Manual Order Created",
+      message: `Manual order ${order.orderId} created by ${employee.email}`,
+      type: "ORDER_CREATED",
+      entityId: order._id,
+      entityModel: "Order",
+      metadata: {
+        orderId: order.orderId,
+        createdBy: employee.email,
+        paymentStatus: order.paymentStatus,
+      },
+    });
+  } catch (err) {
+    console.error("Notification failed on manual order create:", err.message);
+  }
+
+  /* ================= EMAIL (NON-BLOCKING) ================= */
+  try {
+    const emailHtml = orderConfirmationTemplate(
+      user.firstName,
+      order.orderId,
+      order.grandTotal,
+      order.items
+    );
+    await sendZohoMail(
+      user.email,
+      "Order Confirmed",
+      emailHtml
+    );
+  } catch (err) {
+    console.log("EMAIL ERROR (manual order):", err.message);
+  }
+
+  return order;
+};

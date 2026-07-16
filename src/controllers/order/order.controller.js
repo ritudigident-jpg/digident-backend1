@@ -1199,3 +1199,72 @@ export const updateCourierDetails = async (req, res) => {
     return handleError(res, error);
   }
 };
+
+/**
+ * @function createManualOrder
+ *
+ * @description
+ * Allows an authorized employee (e.g. a doctor/staff taking a phone or
+ * walk-in order) to create a confirmed order directly, bypassing the
+ * Razorpay checkout flow. Stock is deducted immediately since the order
+ * is considered confirmed the moment it's created.
+ *
+ * body: {
+ *   userId?: string,        // one of userId / userEmail / userPhone required
+ *   userEmail?: string,
+ *   userPhone?: string,
+ *   items: [{ productId, variantId, quantity }],
+ *   addressId?: string,             // OR shippingAddress below
+ *   shippingAddress?: object,
+ *   billingAddress?: object,        // defaults to shippingAddress
+ *   organizationName?: string,
+ *   gstNumber?: string,
+ *   gstAmount?: number,
+ *   gstPercentage?: number,
+ *   discount?: number,
+ *   shippingCharge?: number,
+ *   couponId?: string,
+ *   paymentStatus: "paid" | "pending",
+ *   paymentMethod?: "cash" | "upi" | "bank_transfer" | "cheque" | "card" | "other", // required if paymentStatus = paid
+ *   paymentReference?: string,
+ *   notes?: string
+ * }
+ *
+ * @response
+ * 201 { success: true, message: "Manual order created successfully", data: { order } }
+ */
+export const createManualOrder = async (req, res) => {
+  try {
+    const { userId, userEmail, userPhone, items, paymentStatus } = req.body;
+
+    if (!userId && !userEmail && !userPhone) {
+      return sendError(res, {
+        message: "One of userId, userEmail, or userPhone is required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return sendError(res, {
+        message: "items are required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+
+    if (!["paid", "pending"].includes(paymentStatus)) {
+      return sendError(res, {
+        message: 'paymentStatus must be "paid" or "pending"',
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+
+    const order = await createManualOrderService(req.body, req.user);
+
+    return sendSuccess(res, { order }, 201, "Manual order created successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};

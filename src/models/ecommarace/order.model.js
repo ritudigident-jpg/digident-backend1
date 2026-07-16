@@ -129,9 +129,10 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMode: {
       type: String,
-      enum: ["RAZORPAY"],
+      enum: ["RAZORPAY", "MANUAL"],
       default: "RAZORPAY",
     },
+
     paymentStatus: {
       type: String,
       enum: [
@@ -162,6 +163,20 @@ const orderSchema = new mongoose.Schema(
     },
     cancellationReason: { type: String, default: null },
     cancelledAt: { type: Date, default: null },
+        /* ================= MANUAL ORDER ================= */
+        isManualOrder: { type: Boolean, default: false },
+        manualPaymentMethod: {
+          type: String,
+          enum: ["cash", "upi", "bank_transfer", "cheque", "card", "other", null],
+          default: null,
+        },
+        manualPaymentReference: { type: String, default: null }, // UPI txn id / cheque no. etc
+        manualOrderNotes: { type: String, default: null },
+        createdBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Employee",
+          default: null,
+        },
     /* ================= RETURN SYSTEM ================= */
     returnRequests: [
       {
