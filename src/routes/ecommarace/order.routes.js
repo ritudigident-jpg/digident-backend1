@@ -1,13 +1,11 @@
 import express from "express";
-import { createOrder,getUserOrders,getSingleOrder,cancelOrder,updateOrderStatus,getAllOrdersAdmin,getOrdersByStatus,markRefundCompleted,salesDashboard,verifyRazorpay,getAllOrders,markRefundCompleteAdmin,createReturnRequest,getAllReturnRequests,updatePendingReturnRequest,updateReturnRequestStatus,updateCourierDetails, createManualOrder, createManualReturn} from "../../controllers/order/order.controller.js";
+import { createOrder,getUserOrders,getSingleOrder,cancelOrder,updateOrderStatus,getAllOrdersAdmin,getOrdersByStatus,markRefundCompleted,salesDashboard,verifyRazorpay,getAllOrders,markRefundCompleteAdmin,createReturnRequest,getAllReturnRequests,updatePendingReturnRequest,updateReturnRequestStatus,updateCourierDetails} from "../../controllers/order/order.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { attachUser } from "../../middlewares/attechuser.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
 
 const router = express.Router();
 // ADMIN ROUTES
-router.post("/manual/create", auth, checkPermission, createManualOrder);
-router.post("/return/manual", auth, checkPermission, createManualReturn);
 router.get("/get/all", getAllOrdersAdmin);
 router.patch("/:orderId/status",auth,checkPermission, updateOrderStatus);
 router.get("/get/status/:status", getOrdersByStatus);
