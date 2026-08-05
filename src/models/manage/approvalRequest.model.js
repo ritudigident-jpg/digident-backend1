@@ -3,13 +3,9 @@ const { Schema, model } = mongoose;
 
 const ApprovalRequestSchema = new Schema({
     requestId:{ type: String,unique: true },
-    type: { type: String, required: true,enum:[] , trim: true },
+    type: { type: String, required: true, trim: true },
     requestedBy: { type: String, required: true, trim: true, lowercase: true },
-
-    // Target resource (can be employee email, product id, etc.)
    targetId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },
-
-    // The data waiting for approval (new password, product details, etc.)
     payload: { type: Schema.Types.Mixed },
 
     status: {
@@ -26,8 +22,5 @@ const ApprovalRequestSchema = new Schema({
     timestamps: true,
   }
 );
-
-// ApprovalRequestSchema.index({ status: 1, type: 1, targetEmail: 1 });
-
 export default model("ApprovalRequest", ApprovalRequestSchema);
 

@@ -4,6 +4,41 @@ import { zohoConfig } from "../../config/zoho.config.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
 
+/**
+ * @function getAccountId
+ *
+ * @route GET /api/zoho/account
+ *
+ * @description
+ * Fetch the authenticated Zoho Mail account information and return the
+ * primary accountId required for sending emails through Zoho Mail APIs.
+ *
+ * @process
+ * 1. Generate Zoho OAuth access token.
+ * 2. Validate access token.
+ * 3. Call Zoho Mail Accounts API.
+ * 4. Validate API response.
+ * 5. Extract primary accountId.
+ * 6. Return account details.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Zoho accounts fetched successfully",
+ *   data: {
+ *     accountId,
+ *     accounts
+ *   }
+ * }
+ *
+ * @errors
+ * 401 - ZOHO_AUTH_FAILED
+ * 404 - ZOHO_ACCOUNT_NOT_FOUND
+ * 500 - ZOHO_INVALID_RESPONSE
+ * 500 - ZOHO_API_ERROR
+ * 500 - INTERNAL_SERVER_ERROR
+ */
+
 export const getAccountId = async (req, res) => {
   try {
     /* =========================

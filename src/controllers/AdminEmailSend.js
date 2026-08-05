@@ -2,6 +2,35 @@ import { lowStockAlertTemplate } from "../config/templates/lowStockAlertTemplate
 import Employee from "../models/employeeModel.js";
 import { sendZohoMail } from "../services/ZohoEmail/zohoMail.service.js";
 
+/**
+ * @function sendLowStockAlertToAdmins
+ *
+ * @description
+ * Send a low stock alert email to all Admin and Super Admin users
+ * whenever one or more products fall below the configured stock threshold.
+ *
+ * @params
+ * lowStockProducts: Array<{
+ *   productName: string,
+ *   sku: string,
+ *   stock: number,
+ *   ...
+ * }>
+ *
+ * @process
+ * 1. Check if lowStockProducts array is empty.
+ * 2. Fetch all Admin and Super Admin employees.
+ * 3. Extract valid email addresses.
+ * 4. Generate HTML email using lowStockAlertTemplate().
+ * 5. Send email via Zoho Mail.
+ * 6. Log success or failure.
+ *
+ * @returns
+ * Promise<void>
+ *
+ * @errors
+ * Logs error if email sending fails.
+ */
 export const sendLowStockAlertToAdmins = async (lowStockProducts) => {
   try {
     if (!lowStockProducts || lowStockProducts.length === 0) return;

@@ -3,6 +3,53 @@ import { sendSuccess } from "../helpers/response.helper.js";
 import { getPagination } from "../helpers/pagination.helper.js";
 import StockAuditLogs from "../models/ecommarace/stockauditlog.model.js";
 
+/**
+ * @function getStockAuditLogs
+ *
+ * @route GET /api/stock-audit-logs
+ *
+ * @description
+ * Fetch stock audit logs with pagination and optional filtering by
+ * order ID, action type, and date range.
+ *
+ * @query
+ * {
+ *   orderId?: string,
+ *   action?: "add" | "deduct",
+ *   startDate?: string,
+ *   endDate?: string,
+ *   page?: number,
+ *   limit?: number
+ * }
+ *
+ * @process
+ * 1. Read query parameters.
+ * 2. Validate page and limit values.
+ * 3. Build filter using orderId, action and date range.
+ * 4. Validate startDate and endDate.
+ * 5. Fetch stock audit logs with pagination.
+ * 6. Count total matching records.
+ * 7. Generate pagination metadata.
+ * 8. Return paginated audit logs.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Stock audit logs fetched successfully",
+ *   data: {
+ *     pagination,
+ *     count,
+ *     logs
+ *   }
+ * }
+ *
+ * @errors
+ * 400 - INVALID_PAGINATION
+ * 400 - INVALID_START_DATE
+ * 400 - INVALID_END_DATE
+ * 404 - NO_LOGS_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 
 export const getStockAuditLogs = async (req, res) => {
   try {

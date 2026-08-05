@@ -17,6 +17,28 @@ import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
 import { getPagination } from "../../helpers/pagination.helper.js";
 
+/**
+ * @function createBlog
+ *
+ * @params
+ * body: {
+ *   title: string,
+ *   contentMarkdown: string,
+ *   category?: string,
+ *   tags?: string[],
+ *   status?: "draft" | "published"
+ * }
+ * file: featuredImage (optional)
+ *
+ * @process
+ * Validate request body using Joi
+ * Fetch authenticated employee using req.user.email
+ * Upload featured image (if provided)
+ * Create blog
+ *
+ * @response
+ * 201 { success: true, message: "Blog created successfully", data: blog }
+ */
 export const createBlog = async (req, res) => {
   try {
     const featuredImage =  req.files?.featuredImage?.[0]
@@ -51,6 +73,33 @@ export const createBlog = async (req, res) => {
   }
 };
 
+/**
+ * @function getBlogs
+ *
+ * @params
+ * query: {
+ *   page?: number,
+ *   limit?: number,
+ *   status?: "draft" | "published",
+ *   category?: string,
+ *   search?: string
+ * }
+ *
+ * @process
+ * Read pagination values
+ * Apply optional filters
+ * Fetch paginated blogs
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Blogs fetched successfully",
+ *   data: {
+ *     blogs,
+ *     pagination
+ *   }
+ * }
+ */
 export const getBlogs = async (req, res) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
@@ -70,6 +119,24 @@ export const getBlogs = async (req, res) => {
   }
 };
 
+/**
+ * @function getBlogById
+ *
+ * @params
+ * params: {
+ *   blogId: string
+ * }
+ *
+ * @process
+ * Fetch blog using blogId
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Blog fetched successfully",
+ *   data: blog
+ * }
+ */
 export const getBlogById = async (req, res) => {
   try {
     const blog = await getBlogByIdService({
@@ -82,6 +149,24 @@ export const getBlogById = async (req, res) => {
   }
 };
 
+/**
+ * @function getBlogBySlug
+ *
+ * @params
+ * params: {
+ *   slug: string
+ * }
+ *
+ * @process
+ * Fetch published blog using slug
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Blog fetched successfully",
+ *   data: blog
+ * }
+ */
 export const getBlogBySlug = async (req, res) => {
   try {
     const blog = await getBlogBySlugService({
@@ -94,6 +179,35 @@ export const getBlogBySlug = async (req, res) => {
   }
 };
 
+/**
+ * @function updateBlog
+ *
+ * @params
+ * params: {
+ *   blogId: string
+ * }
+ * body: {
+ *   title?: string,
+ *   contentMarkdown?: string,
+ *   category?: string,
+ *   tags?: string[],
+ *   status?: "draft" | "published"
+ * }
+ * file?: featuredImage
+ *
+ * @process
+ * Validate request body
+ * Fetch authenticated employee
+ * Replace featured image (if provided)
+ * Update blog details
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Blog updated successfully",
+ *   data: blog
+ * }
+ */
 export const updateBlog = async (req, res) => {
   try {
     const featuredImage = req.files?.featuredImage?.[0];
@@ -128,6 +242,24 @@ export const updateBlog = async (req, res) => {
   }
 };
 
+/**
+ * @function deleteBlog
+ *
+ * @params
+ * params: {
+ *   blogId: string
+ * }
+ *
+ * @process
+ * Fetch authenticated employee
+ * Soft delete blog
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Blog deleted successfully"
+ * }
+ */
 export const deleteBlog = async (req, res) => {
   try {
     const employee = await Employee.findOne({ email: req.user.email });

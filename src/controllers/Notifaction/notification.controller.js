@@ -13,6 +13,31 @@ import {
 import { sendSuccess } from "../../helpers/response.helper.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 
+/**
+ * @function getNotifications
+ *
+ * @route GET /api/notifications
+ *
+ * @description
+ * Fetch all notifications of the logged-in employee with pagination.
+ *
+ * @process
+ * 1. Get logged-in employee using req.user.email.
+ * 2. Verify employee is not deleted.
+ * 3. Fetch notifications with page & limit.
+ * 4. Return paginated notifications.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Notifications fetched successfully",
+ *   data: NotificationsObject
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const getNotifications = async (req, res) => {
   try {
     const employee = await Employee.findOne({
@@ -36,6 +61,30 @@ export const getNotifications = async (req, res) => {
   }
 };
 
+/**
+ * @function getUnreadNotificationCount
+ *
+ * @route GET /api/notifications/unread-count
+ *
+ * @description
+ * Get total unread notification count for the logged-in employee.
+ *
+ * @process
+ * 1. Get logged-in employee.
+ * 2. Count unread notifications.
+ * 3. Return unread count.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Unread count fetched successfully",
+ *   data: { unreadCount }
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const getUnreadNotificationCount =
   async (req, res) => {
     try {
@@ -60,6 +109,32 @@ export const getUnreadNotificationCount =
     }
   };
 
+/**
+ * @function markNotificationAsRead
+ *
+ * @route PATCH /api/notifications/:notificationId/read
+ *
+ * @description
+ * Mark a specific notification as read.
+ *
+ * @process
+ * 1. Get logged-in employee.
+ * 2. Validate notification ownership.
+ * 3. Mark notification as read.
+ * 4. Return updated notification.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Notification marked as read",
+ *   data: NotificationObject
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 404 - NOTIFICATION_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const markNotificationAsRead =
   async (req, res) => {
     try {
@@ -84,6 +159,30 @@ export const markNotificationAsRead =
     }
   };
 
+/**
+ * @function markAllNotificationsAsRead
+ *
+ * @route PATCH /api/notifications/read-all
+ *
+ * @description
+ * Mark all unread notifications of the logged-in employee as read.
+ *
+ * @process
+ * 1. Get logged-in employee.
+ * 2. Mark all unread notifications as read.
+ * 3. Return updated result.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "All notifications marked as read",
+ *   data: ResultObject
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const markAllNotificationsAsRead =
   async (req, res) => {
     try {
@@ -107,6 +206,32 @@ export const markAllNotificationsAsRead =
     }
   };
 
+  /**
+ * @function deleteNotification
+ *
+ * @route DELETE /api/notifications/:notificationId
+ *
+ * @description
+ * Delete a specific notification of the logged-in employee.
+ *
+ * @process
+ * 1. Get logged-in employee.
+ * 2. Verify notification belongs to employee.
+ * 3. Delete notification.
+ * 4. Return success response.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Notification deleted successfully",
+ *   data: ResultObject
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 404 - NOTIFICATION_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const deleteNotification =
   async (req, res) => {
     try {
@@ -131,6 +256,30 @@ export const deleteNotification =
     }
   };
 
+  /**
+ * @function deleteAllNotifications
+ *
+ * @route DELETE /api/notifications
+ *
+ * @description
+ * Delete all notifications of the logged-in employee.
+ *
+ * @process
+ * 1. Get logged-in employee.
+ * 2. Delete all notifications.
+ * 3. Return success response.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "All notifications deleted successfully",
+ *   data: ResultObject
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const deleteAllNotifications =
   async (req, res) => {
     try {
@@ -154,6 +303,33 @@ export const deleteAllNotifications =
     }
   };
 
+  /**
+ * @function sendCustomNotification
+ *
+ * @route POST /api/notifications/send
+ *
+ * @description
+ * Send a custom notification to one or multiple employees.
+ *
+ * @process
+ * 1. Get logged-in employee.
+ * 2. Read notification payload from request body.
+ * 3. Call notification service.
+ * 4. Store notification(s).
+ * 5. Trigger realtime notification (if enabled).
+ * 6. Return success response.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Notification sent successfully"
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const sendCustomNotification =
   async (req, res) => {
     try {

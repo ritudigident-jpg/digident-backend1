@@ -2,14 +2,62 @@ import mongoose from "mongoose";
 /* ---------- ADDRESS ---------- */
 const addressSchema = new mongoose.Schema(
   {
-    fullName: { type: String, required: true },
-    phone: { type: String, required: true },
-    street: { type: String, required: true },
-    area: { type: String, required: true },
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    country: { type: String, required: true },
-    pincode: { type: String, required: true },
+    fullName: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 100,
+    },
+
+    phone: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 20,
+    },
+
+    street: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 255,
+    },
+
+    area: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 255,
+    },
+
+    city: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+    },
+
+    state: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+    },
+
+    country: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+    },
+
+    pincode: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 20,
+    },
   },
   { _id: false }
 );
@@ -19,39 +67,64 @@ const orderItemSchema = new mongoose.Schema(
     productId: {
       type: String,
       required: true,
+      trim: true,
     },
     variantId: {
       type: String,
       required: true,
+      trim: true,
     },
-    sku: String,
-    productName: String,
-    variantName: String,
-    categoryName: { type: String },
+   sku: {
+  type: String,
+  trim: true,
+  default: "",
+  maxlength: 100,
+},
 
-    price: {
-      type: Number,
-      required: true,
-    },
+productName: {
+  type: String,
+  trim: true,
+  required: true,
+  maxlength: 200,
+},
 
-    quantity: {
-      type: Number,
-      required: true
-    },
-
+variantName: {
+  type: String,
+  trim: true,
+  default: "",
+  maxlength: 200,
+},
+   categoryName: {
+  type: String,
+  trim: true,
+  default: "",
+  maxlength: 100,
+},
+price: {
+  type: Number,
+  required: true,
+  min: 0,
+},
+quantity: {
+  type: Number,
+  required: true,
+},
     // Added for return tracking
     returnedQuantity: {
       type: Number,
       default: 0,
+      min: 0,
     },
-
     attributes: {
       type: Map,
       of: mongoose.Schema.Types.Mixed,
       default: {},
     },
-
-    image: String,
+  image: {
+  type: String,
+  trim: true,
+  default: "",
+},
   },
   { _id: false }
 );
@@ -64,8 +137,17 @@ const couponSchema = new mongoose.Schema(
       ref: "Coupon",
       default: null,
     },
-    couponId: { type: String, default: null },
-    code: { type: String, default: null },
+  couponId: {
+  type: String,
+  trim: true,
+  default: null,
+},
+code: {
+  type: String,
+  trim: true,
+  uppercase: true,
+  default: null,
+},
     couponType:{
       type: String,
       enum: [
@@ -88,11 +170,12 @@ const couponSchema = new mongoose.Schema(
 const orderSchema = new mongoose.Schema(
   {
     invoiceId: { type: String},
-    iId:{ type: String, unique: true },
+    iId:{ type: String, unique: true,trim: true, },
     orderId: {
       type: String,
       unique: true,
       required: true,
+      trim: true,
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,
@@ -106,6 +189,7 @@ const orderSchema = new mongoose.Schema(
     shippingCharge: {
       type: Number,
       default: 0,
+      min: 0,
     },
     grandTotal: {
       type: Number,
@@ -212,16 +296,37 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    refundHistory: [
-      {
-        refundId: String,
-        amount: Number,
-        refundedBy: String,
-        refundedAt: Date,
-        refundStatus: String,
-        method: { type: String, default: null },
-      },
-    ],
+refundHistory: [
+  {
+    refundId: {
+      type: String,
+      trim: true,
+    },
+
+    amount: {
+      type: Number,
+      min: 0,
+    },
+
+    refundedBy: {
+      type: String,
+      trim: true,
+    },
+
+    refundedAt: Date,
+
+    refundStatus: {
+      type: String,
+      trim: true,
+    },
+
+    method: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+  },
+],
     razorpayOrderId: { type: String, default: null },
     razorpayPaymentId: { type: String, default: null },
     razorpaySignature: { type: String, default: null },

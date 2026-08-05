@@ -12,16 +12,29 @@ const blogViewSchema = new Schema(
       unique: true,
       default: () => uuidv6(),
     },
-
     blog: {
       type: Schema.Types.ObjectId,
       ref: "Blog",
       required: true,
     },
-
-    ipAddress: String,
-    userAgent: String,
-    referrer: String,
+    ipAddress: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 45, 
+    },
+    userAgent: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 500,
+    },
+    referrer: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 500,
+    },
 
     viewedAt: {
       type: Date,
@@ -30,5 +43,4 @@ const blogViewSchema = new Schema(
   },
   { timestamps: true }
 );
-
 export default model("BlogView", blogViewSchema);

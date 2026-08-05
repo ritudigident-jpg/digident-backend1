@@ -10,7 +10,31 @@ import { sendError, handleError } from "../../helpers/error.helper.js";
 import {sendSuccess} from "../../helpers/response.helper.js"
 
 
-// ➤ ADD COMMENT
+/**
+ * @function addBlogComment
+ *
+ * @params
+ * params: {
+ *   blogId: string
+ * }
+ * body: {
+ *   name: string,
+ *   company?: string,
+ *   city?: string,
+ *   review: string
+ * }
+ *
+ * @process
+ * Validate comment data
+ * Add comment to blog
+ *
+ * @response
+ * 201 {
+ *   success: true,
+ *   message: "Comment added",
+ *   data: blog
+ * }
+ */
 export const addBlogComment = async (req, res) => {
   try {
     
@@ -26,7 +50,29 @@ export const addBlogComment = async (req, res) => {
 };
 
 
-// ➤ DELETE COMMENT
+/**
+ * @function deleteBlogComment
+ *
+ * @params
+ * params: {
+ *   blogId: string,
+ *   commentId: string
+ * }
+ * body: {
+ *   permission?: string
+ * }
+ *
+ * @process
+ * Fetch authenticated employee
+ * Verify delete permission
+ * Remove comment from blog
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Comment deleted"
+ * }
+ */
 export const deleteBlogComment = async (req, res) => {
   try {
     const employee = await Employee.findOne({ email: req.user.email });
@@ -46,7 +92,26 @@ export const deleteBlogComment = async (req, res) => {
 };
 
 
-// ➤ INCREASE VIEW
+/**
+ * @function increaseBlogView
+ *
+ * @params
+ * params: {
+ *   blogId: string
+ * }
+ *
+ * @process
+ * Record blog view using request metadata
+ * Prevent duplicate view counting (service logic)
+ * Increase blog view count
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "View updated",
+ *   data: blog
+ * }
+ */
 export const increaseBlogView = async (req, res) => {
   try {
     const result = await increaseBlogViewService({

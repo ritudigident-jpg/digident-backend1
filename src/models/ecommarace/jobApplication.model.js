@@ -1,16 +1,41 @@
 import mongoose from "mongoose";
-import { v6 as uuidv6 } from "uuid";
 const { Schema, model } = mongoose;
-
 
 const fileSchema = new Schema(
   {
-    filename: { type: String, trim: true },
-    originalName: { type: String, trim: true },
-    url: { type: String, trim: true },
-    key: { type: String, trim: true },
-    mimeType: { type: String, trim: true },
-    sizeBytes: { type: Number, default: 0 },
+    filename: {
+      type: String,
+      trim: true,
+      maxlength: 255,
+    },
+
+    originalName: {
+      type: String,
+      trim: true,
+      maxlength: 255,
+    },
+
+    url: {
+      type: String,
+      trim: true,
+    },
+
+    key: {
+      type: String,
+      trim: true,
+    },
+
+    mimeType: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
+
+    sizeBytes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { _id: false }
 );
@@ -20,17 +45,43 @@ const noteSchema = new Schema(
     noteId: {
       type: String,
     },
+
     note: {
       type: String,
       required: true,
       trim: true,
+      minlength: 2,
+      maxlength: 5000,
     },
+
     addedBy: {
-      employeeId: { type: String, default: null },
-      employeeRef: { type: Schema.Types.ObjectId, ref: "Employee", default: null },
-      name: { type: String, trim: true, default: null },
-      email: { type: String, trim: true, default: null },
+      employeeId: {
+        type: String,
+        default: null,
+      },
+
+      employeeRef: {
+        type: Schema.Types.ObjectId,
+        ref: "Employee",
+        default: null,
+      },
+
+      name: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 255,
+        default: null,
+      },
     },
+
     addedAt: {
       type: Date,
       default: Date.now,
@@ -41,89 +92,119 @@ const noteSchema = new Schema(
 
 const jobApplicationSchema = new Schema(
   {
-    applicationId:{
+    applicationId: {
       type: String,
       unique: true,
     },
-    job:{
+
+    job: {
       type: Schema.Types.ObjectId,
       ref: "Job",
       required: true,
     },
-    jobId:{
+
+    jobId: {
       type: String,
       required: true,
+      trim: true,
     },
-    applicant:{
+
+    applicant: {
       firstName: {
         type: String,
         required: true,
         trim: true,
+        minlength: 2,
+        maxlength: 100,
       },
-      lastName:{
+
+      lastName: {
         type: String,
         required: true,
         trim: true,
+        minlength: 2,
+        maxlength: 100,
       },
-      email:{
+
+      email: {
         type: String,
         required: true,
         lowercase: true,
         trim: true,
-        index: true,
+        maxlength: 255,
       },
-      phone:{
+
+      phone: {
         type: String,
         required: true,
         trim: true,
+        maxlength: 20,
       },
-      city:{
+
+      city: {
         type: String,
         trim: true,
+        maxlength: 100,
         default: null,
       },
-      state:{
+
+      state: {
         type: String,
         trim: true,
+        maxlength: 100,
         default: null,
       },
-      country:{
+
+      country: {
         type: String,
         trim: true,
+        maxlength: 100,
         default: null,
       },
-      totalExperienceYears:{
+
+      totalExperienceYears: {
         type: Number,
         default: 0,
         min: 0,
       },
-      currentCompany:{
+
+      currentCompany: {
         type: String,
         trim: true,
+        maxlength: 200,
         default: null,
       },
-      currentCTC:{
+
+      currentCTC: {
         type: Number,
         default: 0,
+        min: 0,
       },
-      expectedCTC:{
+
+      expectedCTC: {
         type: Number,
         default: 0,
+        min: 0,
       },
-      noticePeriodDays:{
+
+      noticePeriodDays: {
         type: Number,
         default: 0,
+        min: 0,
       },
+
       portfolioUrl: {
         type: String,
         trim: true,
         default: null,
       },
+
       linkedinUrl: {
         type: String,
         trim: true,
         default: null,
       },
+
       githubUrl: {
         type: String,
         trim: true,
@@ -134,19 +215,31 @@ const jobApplicationSchema = new Schema(
     coverLetter: {
       type: String,
       trim: true,
+      maxlength: 5000,
       default: null,
     },
 
     resume: {
       type: String,
       required: true,
+      trim: true,
     },
 
-    additionalFiles: [String],
+    additionalFiles: {
+      type: [fileSchema],
+      default: [],
+    },
 
     source: {
       type: String,
-      enum: ["career_page", "linkedin", "naukri", "referral", "manual", "other"],
+      enum: [
+        "career_page",
+        "linkedin",
+        "naukri",
+        "referral",
+        "manual",
+        "other",
+      ],
       default: "career_page",
     },
 
@@ -164,13 +257,37 @@ const jobApplicationSchema = new Schema(
       default: "applied",
     },
 
-    notes: [noteSchema],
+    notes: {
+      type: [noteSchema],
+      default: [],
+    },
 
     assignedTo: {
-      employeeId: { type: String, default: null },
-      employeeRef: { type: Schema.Types.ObjectId, ref: "Employee", default: null },
-      name: { type: String, trim: true, default: null },
-      email: { type: String, trim: true, default: null },
+      employeeId: {
+        type: String,
+        default: null,
+      },
+
+      employeeRef: {
+        type: Schema.Types.ObjectId,
+        ref: "Employee",
+        default: null,
+      },
+
+      name: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 255,
+        default: null,
+      },
     },
 
     reviewedAt: {
@@ -187,5 +304,5 @@ const jobApplicationSchema = new Schema(
     timestamps: true,
   }
 );
-const JobApplication = model("JobApplication", jobApplicationSchema);
-export default JobApplication;
+
+export default model("JobApplication", jobApplicationSchema);

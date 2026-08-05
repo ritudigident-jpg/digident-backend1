@@ -3,7 +3,7 @@ import { assignPermissionToEmployee, createPermission,deletePermission, getAllPe
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
 import checkAdminRole from "../../middlewares/checkAdminRole.middleware.js";
-import hierarchyMiddleware from "../../middlewares/hierarchy.middleware.js";
+
 
 const router  = express.Router();
 router.post("/create", auth,checkAdminRole ,createPermission);

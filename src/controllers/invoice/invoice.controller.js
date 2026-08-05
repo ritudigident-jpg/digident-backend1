@@ -18,13 +18,29 @@ import Invoice from "../../models/manage/invoice.model.js";
 /**
  * @function createInvoice
  *
+ * @route POST /api/invoice
+ *
  * @description
- * Create invoice with automatic invoice number, customer number,
- * order number, due date, seller defaults, bank defaults and totals.
+ * Create a new invoice from the provided invoice details.
+ *
+ * @process
+ * 1. Validate request body using Joi.
+ * 2. Fetch authenticated employee.
+ * 3. Create invoice using createInvoiceService.
+ * 4. Generate PermissionAudit entry.
+ * 5. Return created invoice.
  *
  * @response
- * 201 { success: true, message: "Invoice created successfully", data: invoice }
- * 400 { success: false, message: "Validation failed" }
+ * 201 {
+ *   success: true,
+ *   message: "Invoice created successfully",
+ *   data: InvoiceObject
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
  */
 export const createInvoice = async (req, res) => {
   try {
@@ -70,6 +86,35 @@ export const createInvoice = async (req, res) => {
   }
 };
 
+/**
+ * @function createInvoiceFromOrder
+ *
+ * @route POST /api/invoice/order
+ *
+ * @description
+ * Create an invoice from an existing order and link both records.
+ *
+ * @process
+ * 1. Validate request body using Joi.
+ * 2. Fetch authenticated user.
+ * 3. Create invoice.
+ * 4. Find order using orderId.
+ * 5. Update Order with invoiceId and iId.
+ * 6. Return created invoice.
+ *
+ * @response
+ * 201 {
+ *   success: true,
+ *   message: "Invoice created successfully",
+ *   data: InvoiceObject
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - USER_NOT_FOUND
+ * 404 - ORDER_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const createInvoiceFromOrder = async(req,res)=>{
   try{
      const { value, error } = createInvoiceValidator.validate(req.body, {
@@ -118,8 +163,30 @@ export const createInvoiceFromOrder = async(req,res)=>{
 /**
  * @function updateInvoice
  *
+ * @route PUT /api/invoice/:invoiceId
+ *
  * @description
- * Update invoice details by invoiceId.
+ * Update an existing invoice by invoiceId.
+ *
+ * @process
+ * 1. Validate request body.
+ * 2. Fetch authenticated employee.
+ * 3. Update invoice.
+ * 4. Create PermissionAudit entry.
+ * 5. Return updated invoice.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoice updated successfully",
+ *   data: InvoiceObject
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 404 - INVOICE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
  */
 export const updateInvoice = async (req, res) => {
   try {
@@ -173,6 +240,33 @@ export const updateInvoice = async (req, res) => {
   }
 };
 
+/**
+ * @function updateInvoiceByUser
+ *
+ * @route PUT /api/user/invoice/:invoiceId
+ *
+ * @description
+ * Update an invoice by the authenticated user.
+ *
+ * @process
+ * 1. Validate request body.
+ * 2. Fetch authenticated user.
+ * 3. Update invoice.
+ * 4. Return updated invoice.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoice updated successfully",
+ *   data: InvoiceObject
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - USER_NOT_FOUND
+ * 404 - INVOICE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const updateInvoiceByUser = async (req, res) => {
   try {
     const { value, error } = createInvoiceValidator.validate(req.body, {
@@ -210,8 +304,27 @@ export const updateInvoiceByUser = async (req, res) => {
 /**
  * @function deleteInvoice
  *
+ * @route DELETE /api/invoice/:invoiceId
+ *
  * @description
- * Soft delete invoice by invoiceId.
+ * Delete an invoice and create an audit log.
+ *
+ * @process
+ * 1. Fetch authenticated employee.
+ * 2. Delete invoice.
+ * 3. Create PermissionAudit entry.
+ * 4. Return success response.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoice deleted successfully"
+ * }
+ *
+ * @errors
+ * 404 - EMPLOYEE_NOT_FOUND
+ * 404 - INVOICE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
  */
 export const deleteInvoice = async (req, res) => {
   try {
@@ -242,6 +355,30 @@ export const deleteInvoice = async (req, res) => {
   }
 };
 
+/**
+ * @function deleteInvoiceByUser
+ *
+ * @route DELETE /api/user/invoice/:invoiceId
+ *
+ * @description
+ * Delete an invoice by the authenticated user.
+ *
+ * @process
+ * 1. Fetch authenticated user.
+ * 2. Delete invoice.
+ * 3. Return success response.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoice deleted successfully"
+ * }
+ *
+ * @errors
+ * 404 - USER_NOT_FOUND
+ * 404 - INVOICE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const deleteInvoiceByUser = async (req, res) => {  
   try {
     const user = await User.findOne({ email: req.user.email });
@@ -262,6 +399,31 @@ export const deleteInvoiceByUser = async (req, res) => {
   }
 };
 
+/**
+ * @function getInvoiceByIdForUser
+ *
+ * @route GET /api/user/invoice/:invoiceId
+ *
+ * @description
+ * Fetch invoice details for the authenticated user.
+ *
+ * @process
+ * 1. Fetch authenticated user.
+ * 2. Fetch invoice.
+ * 3. Return invoice details.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoice fetched successfully",
+ *   data: InvoiceObject
+ * }
+ *
+ * @errors
+ * 404 - USER_NOT_FOUND
+ * 404 - INVOICE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const getInvoiceByIdForUser = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.user.email }); 
@@ -284,8 +446,26 @@ export const getInvoiceByIdForUser = async (req, res) => {
 /**
  * @function getInvoiceById
  *
+ * @route GET /api/invoice/:invoiceId
+ *
  * @description
- * Get invoice details by invoiceId.
+ * Fetch invoice details by invoiceId.
+ *
+ * @process
+ * 1. Read invoiceId from params.
+ * 2. Fetch invoice.
+ * 3. Return invoice details.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoice fetched successfully",
+ *   data: InvoiceObject
+ * }
+ *
+ * @errors
+ * 404 - INVOICE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
  */
 export const getInvoiceById = async (req, res) => {
   try {
@@ -298,22 +478,29 @@ export const getInvoiceById = async (req, res) => {
   }
 };
 
-// /**
-//  * @function getInvoices
-//  *
-//  * @description
-//  * Fetch all invoices with pagination and filters.
-//  */
-// export const getInvoices = async (req, res) => {
-//   try {
-//     const result = await getInvoicesService({
-//       query: req.query,
-//     });
-//     return sendSuccess(res, result, 200, "Invoices fetched successfully");
-//   } catch (error) {
-//     return handleError(res, error);
-//   }
-// };
+/**
+ * @function getInvoiceCustomers
+ *
+ * @route GET /api/invoice/customers
+ *
+ * @description
+ * Retrieve unique customers from existing invoices.
+ *
+ * @process
+ * 1. Fetch invoices.
+ * 2. Group by customer number.
+ * 3. Return unique customer list.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Customers fetched successfully",
+ *   data: CustomerList
+ * }
+ *
+ * @errors
+ * 500 - FETCH_CUSTOMERS_ERROR
+ */
 
 export const getInvoiceCustomers = async (req, res) => {
   try {
@@ -393,8 +580,26 @@ export const getInvoiceCustomers = async (req, res) => {
 /**
  * @function deleteAllInvoices
  *
+ * @route DELETE /api/invoice/all
+ *
  * @description
- * Permanently delete all invoices from database.
+ * Permanently delete all invoices from the database.
+ *
+ * @process
+ * 1. Delete all invoice documents.
+ * 2. Return deleted count.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "All invoices deleted permanently",
+ *   data: {
+ *     deletedCount: number
+ *   }
+ * }
+ *
+ * @errors
+ * 500 - INTERNAL_SERVER_ERROR
  */
 export const deleteAllInvoices = async (req, res) => {
   try {
@@ -417,6 +622,31 @@ export const deleteAllInvoices = async (req, res) => {
   }
 };
 
+/**
+ * @function getInvoicesByCustomerId
+ *
+ * @route GET /api/invoice/customer/:customerNo
+ *
+ * @description
+ * Fetch all invoices for a specific customer.
+ *
+ * @process
+ * 1. Validate customer number.
+ * 2. Fetch invoices.
+ * 3. Return invoice list.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Customer invoices fetched successfully",
+ *   data: InvoiceList
+ * }
+ *
+ * @errors
+ * 400 - CUSTOMER_NO_REQUIRED
+ * 404 - INVOICES_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const getInvoicesByCustomerId = async (req, res) => {
   try {
     const { customerNo } = req.params;
@@ -453,9 +683,32 @@ export const getInvoicesByCustomerId = async (req, res) => {
 };
 
 
-/* =========================================================
-   GET ALL INVOICES  (with month/year/status/search filter)
-========================================================= */
+/**
+ * @function getInvoices
+ *
+ * @route GET /api/invoice
+ *
+ * @description
+ * Fetch invoices with pagination, search and filters.
+ *
+ * @process
+ * 1. Validate month and year filters.
+ * 2. Apply search and status filters.
+ * 3. Fetch paginated invoices.
+ * 4. Return invoice list.
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Invoices fetched successfully",
+ *   data: InvoiceList
+ * }
+ *
+ * @errors
+ * 400 - INVALID_MONTH
+ * 400 - INVALID_YEAR
+ * 500 - INTERNAL_SERVER_ERROR
+ */
 export const getInvoices = async (req, res) => {
   try {
     const { month, year } = req.query;

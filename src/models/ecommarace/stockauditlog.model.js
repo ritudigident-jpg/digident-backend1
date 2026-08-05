@@ -8,7 +8,7 @@ const stockAuditLogSchema = new mongoose.Schema(
       trim: true,
       index: true, // for faster searching
     },
-    action: {
+    action:{
       type: String,
       required: true,
       enum: ["add", "deduct"],
@@ -31,8 +31,7 @@ const stockAuditLogSchema = new mongoose.Schema(
         },
       },
     ],
-
-    time: {
+    time:{
       type: Date,
       default: Date.now,
     },
