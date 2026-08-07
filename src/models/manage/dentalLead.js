@@ -31,7 +31,7 @@ const remarkFollowupSchema = new mongoose.Schema(
 
     nextCallDate: {
       type: Date,
-      required: true,
+      required: false,
     },
 
     round: {
