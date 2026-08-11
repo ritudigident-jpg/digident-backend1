@@ -6,6 +6,7 @@ import {
   cancelManualOrderService,
   createManualReturnService,
   updateManualOrderCourierService,
+  getManualOrderAnalyticsService,
 } from "../services/manualOrder.service.js";
 import { sendError, handleError } from "../helpers/error.helper.js";
 import { sendSuccess } from "../helpers/response.helper.js";
@@ -147,6 +148,31 @@ export const createManualReturn = async (req, res) => {
   }
 };
 
+/**
+ * @function getManualOrderAnalytics
+ * @description Aggregated analytics for manual orders — used to power
+ * dashboard graphs (total orders/revenue, top selling products, sales
+ * by city/state/country, order & payment status breakdowns, and a
+ * date-wise trend for a line/bar chart).
+ *
+ * query: {
+ *   startDate?: ISO date string,
+ *   endDate?: ISO date string,
+ *   topLimit?: number (default 10) - how many top products to return,
+ *   locationLimit?: number (default 10) - how many top cities/states/countries,
+ *   includeCancelled?: "true" | "false" (default false),
+ *   groupBy?: "day" | "month" (default "day") - trend bucket size
+ * }
+ */
+export const getManualOrderAnalytics = async (req, res) => {
+  try {
+    const data = await getManualOrderAnalyticsService(req.query);
+    return sendSuccess(res, data, 200, "Manual order analytics fetched successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 export const updateManualOrderCourier = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -165,3 +191,4 @@ export const updateManualOrderCourier = async (req, res) => {
     return handleError(res, error);
   }
 };
+

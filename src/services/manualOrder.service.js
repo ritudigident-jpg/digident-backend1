@@ -585,6 +585,257 @@ export const createManualReturnService = async (data, currentUser) => {
 };
 
 /* =========================================================
+   MANUAL ORDER ANALYTICS (totals, top products, sales by
+   city/state/country, status breakdowns, trend for graphs)
+========================================================= */
+export const getManualOrderAnalyticsService = async (query) => {
+  const {
+    startDate,
+    endDate,
+    topLimit = 10,
+    locationLimit = 10,
+    includeCancelled = false,
+    groupBy = "day", // "day" | "month"
+  } = query;
+
+  const parsedTopLimit = Math.min(Math.max(Number(topLimit) || 10, 1), 100);
+  const parsedLocationLimit = Math.min(Math.max(Number(locationLimit) || 10, 1), 100);
+
+  /* ---------- MATCH STAGE ---------- */
+  const match = {};
+
+  if (startDate || endDate) {
+    match.createdAt = {};
+    if (startDate) {
+      const from = new Date(startDate);
+      if (Number.isNaN(from.getTime())) {
+        const error = new Error("Invalid startDate");
+        error.statusCode = 400;
+        error.errorCode = "VALIDATION_ERROR";
+        throw error;
+      }
+      match.createdAt.$gte = from;
+    }
+    if (endDate) {
+      const to = new Date(endDate);
+      if (Number.isNaN(to.getTime())) {
+        const error = new Error("Invalid endDate");
+        error.statusCode = 400;
+        error.errorCode = "VALIDATION_ERROR";
+        throw error;
+      }
+      to.setHours(23, 59, 59, 999);
+      match.createdAt.$lte = to;
+    }
+  }
+
+  const includeCancelledBool = includeCancelled === true || includeCancelled === "true";
+  if (!includeCancelledBool) {
+    match.orderStatus = { $ne: "cancelled" };
+  }
+
+  const dateFormat = groupBy === "month" ? "%Y-%m" : "%Y-%m-%d";
+
+  const [result] = await ManualOrder.aggregate([
+    { $match: match },
+    {
+      $facet: {
+        /* ---------- OVERALL SUMMARY ---------- */
+        summary: [
+          {
+            $group: {
+              _id: null,
+              totalOrders: { $sum: 1 },
+              totalRevenue: { $sum: "$grandTotal" },
+              totalItemsSold: {
+                $sum: {
+                  $sum: "$items.quantity",
+                },
+              },
+              uniqueCustomers: { $addToSet: "$customerPhone" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalOrders: 1,
+              totalRevenue: 1,
+              totalItemsSold: 1,
+              totalUniqueCustomers: { $size: "$uniqueCustomers" },
+              avgOrderValue: {
+                $cond: [
+                  { $eq: ["$totalOrders", 0] },
+                  0,
+                  { $divide: ["$totalRevenue", "$totalOrders"] },
+                ],
+              },
+            },
+          },
+        ],
+
+        /* ---------- ORDERS BY STATUS ---------- */
+        ordersByStatus: [
+          {
+            $group: {
+              _id: "$orderStatus",
+              count: { $sum: 1 },
+              totalRevenue: { $sum: "$grandTotal" },
+            },
+          },
+          { $project: { _id: 0, status: "$_id", count: 1, totalRevenue: 1 } },
+          { $sort: { count: -1 } },
+        ],
+
+        /* ---------- PAYMENT STATUS BREAKDOWN ---------- */
+        paymentStatusBreakdown: [
+          {
+            $group: {
+              _id: "$paymentStatus",
+              count: { $sum: 1 },
+              totalAmount: { $sum: "$grandTotal" },
+            },
+          },
+          { $project: { _id: 0, paymentStatus: "$_id", count: 1, totalAmount: 1 } },
+          { $sort: { count: -1 } },
+        ],
+
+        /* ---------- TOP SELLING PRODUCTS ---------- */
+        topProducts: [
+          { $unwind: "$items" },
+          {
+            $group: {
+              _id: "$items.productName",
+              totalQuantitySold: { $sum: "$items.quantity" },
+              totalRevenue: { $sum: { $multiply: ["$items.price", "$items.quantity"] } },
+              orderIds: { $addToSet: "$orderId" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              productName: "$_id",
+              totalQuantitySold: 1,
+              totalRevenue: 1,
+              totalOrders: { $size: "$orderIds" },
+            },
+          },
+          { $sort: { totalQuantitySold: -1 } },
+          { $limit: parsedTopLimit },
+        ],
+
+        /* ---------- SALES BY CITY ---------- */
+        salesByCity: [
+          { $unwind: "$items" },
+          {
+            $group: {
+              _id: "$shippingAddress.city",
+              totalQuantitySold: { $sum: "$items.quantity" },
+              totalRevenue: { $sum: { $multiply: ["$items.price", "$items.quantity"] } },
+              orderIds: { $addToSet: "$orderId" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              city: { $ifNull: ["$_id", "Unknown"] },
+              totalQuantitySold: 1,
+              totalRevenue: 1,
+              totalOrders: { $size: "$orderIds" },
+            },
+          },
+          { $sort: { totalRevenue: -1 } },
+          { $limit: parsedLocationLimit },
+        ],
+
+        /* ---------- SALES BY STATE ---------- */
+        salesByState: [
+          { $unwind: "$items" },
+          {
+            $group: {
+              _id: "$shippingAddress.state",
+              totalQuantitySold: { $sum: "$items.quantity" },
+              totalRevenue: { $sum: { $multiply: ["$items.price", "$items.quantity"] } },
+              orderIds: { $addToSet: "$orderId" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              state: { $ifNull: ["$_id", "Unknown"] },
+              totalQuantitySold: 1,
+              totalRevenue: 1,
+              totalOrders: { $size: "$orderIds" },
+            },
+          },
+          { $sort: { totalRevenue: -1 } },
+          { $limit: parsedLocationLimit },
+        ],
+
+        /* ---------- SALES BY COUNTRY ---------- */
+        salesByCountry: [
+          { $unwind: "$items" },
+          {
+            $group: {
+              _id: "$shippingAddress.country",
+              totalQuantitySold: { $sum: "$items.quantity" },
+              totalRevenue: { $sum: { $multiply: ["$items.price", "$items.quantity"] } },
+              orderIds: { $addToSet: "$orderId" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              country: { $ifNull: ["$_id", "Unknown"] },
+              totalQuantitySold: 1,
+              totalRevenue: 1,
+              totalOrders: { $size: "$orderIds" },
+            },
+          },
+          { $sort: { totalRevenue: -1 } },
+          { $limit: parsedLocationLimit },
+        ],
+
+        /* ---------- ORDERS / REVENUE TREND (for line/bar graph) ---------- */
+        salesTrend: [
+          {
+            $group: {
+              _id: { $dateToString: { format: dateFormat, date: "$createdAt" } },
+              totalOrders: { $sum: 1 },
+              totalRevenue: { $sum: "$grandTotal" },
+            },
+          },
+          { $project: { _id: 0, date: "$_id", totalOrders: 1, totalRevenue: 1 } },
+          { $sort: { date: 1 } },
+        ],
+      },
+    },
+  ]);
+
+  return {
+    summary: result.summary[0] || {
+      totalOrders: 0,
+      totalRevenue: 0,
+      totalItemsSold: 0,
+      totalUniqueCustomers: 0,
+      avgOrderValue: 0,
+    },
+    ordersByStatus: result.ordersByStatus,
+    paymentStatusBreakdown: result.paymentStatusBreakdown,
+    topProducts: result.topProducts,
+    salesByCity: result.salesByCity,
+    salesByState: result.salesByState,
+    salesByCountry: result.salesByCountry,
+    salesTrend: result.salesTrend,
+    filters: {
+      startDate: startDate || null,
+      endDate: endDate || null,
+      includeCancelled: includeCancelledBool,
+      groupBy,
+    },
+  };
+};
+
+/* =========================================================
    MANUAL COURIER UPDATE
 ========================================================= */
 export const updateManualOrderCourierService = async (data, currentUser) => {
