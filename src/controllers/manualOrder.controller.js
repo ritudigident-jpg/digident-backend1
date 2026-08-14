@@ -3,10 +3,12 @@ import {
   getManualOrderService,
   getAllManualOrdersService,
   updateManualOrderStatusService,
+  updateManualOrderPaymentStatusService,
   cancelManualOrderService,
   createManualReturnService,
   updateManualOrderCourierService,
   getManualOrderAnalyticsService,
+  getCustomerBalanceLedgerService,
 } from "../services/manualOrder.service.js";
 import { sendError, handleError } from "../helpers/error.helper.js";
 import { sendSuccess } from "../helpers/response.helper.js";
@@ -110,6 +112,26 @@ export const updateManualOrderStatus = async (req, res) => {
   }
 };
 
+export const updateManualOrderPaymentStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { paymentStatus, paymentMethod, paymentReference } = req.body;
+
+    if (!orderId) return sendError(res, { message: "orderId is required", statusCode: 400 });
+    if (!["paid", "pending"].includes(paymentStatus)) {
+      return sendError(res, { message: 'paymentStatus must be "paid" or "pending"', statusCode: 400 });
+    }
+
+    const result = await updateManualOrderPaymentStatusService(
+      { orderId, paymentStatus, paymentMethod, paymentReference },
+      req.user
+    );
+    return sendSuccess(res, result, 200, "Manual order payment status updated successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 export const cancelManualOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -173,6 +195,29 @@ export const getManualOrderAnalytics = async (req, res) => {
   }
 };
 
+/**
+ * @function getCustomerBalanceLedger
+ * @description Per-customer return & balance ledger — for every customer,
+ * shows total orders, total returned value, and whether the company owes
+ * the customer a refund or the customer still owes the company money.
+ *
+ * query: {
+ *   startDate?: ISO date string,
+ *   endDate?: ISO date string,
+ *   search?: string - matches customer name / phone / email,
+ *   balanceStatus?: "customer_owes" | "company_owes" | "settled",
+ *   sortBy?: "netBalance" (default) | "name" | "recent"
+ * }
+ */
+export const getCustomerBalanceLedger = async (req, res) => {
+  try {
+    const data = await getCustomerBalanceLedgerService(req.query);
+    return sendSuccess(res, data, 200, "Customer balance ledger fetched successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 export const updateManualOrderCourier = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -191,4 +236,3 @@ export const updateManualOrderCourier = async (req, res) => {
     return handleError(res, error);
   }
 };
-

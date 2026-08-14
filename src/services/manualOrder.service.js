@@ -372,6 +372,99 @@ export const updateManualOrderStatusService = async (data, currentUser) => {
 };
 
 /* =========================================================
+   UPDATE MANUAL ORDER PAYMENT STATUS (pending <-> paid)
+========================================================= */
+export const updateManualOrderPaymentStatusService = async (data, currentUser) => {
+  const { orderId, paymentStatus, paymentMethod, paymentReference } = data;
+
+  const employee = await Employee.findOne({ email: currentUser.email });
+  if (!employee) {
+    const err = new Error("Employee not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const order = await ManualOrder.findOne({ orderId });
+  if (!order) {
+    const err = new Error("Manual order not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const nonEditableStatuses = ["refunded", "refund_pending", "partial_refunded"];
+  if (nonEditableStatuses.includes(order.paymentStatus)) {
+    const err = new Error(`Payment status cannot be changed manually while it is "${order.paymentStatus}"`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (order.paymentStatus === paymentStatus) {
+    const err = new Error(`Order payment is already "${paymentStatus}"`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const oldPaymentStatus = order.paymentStatus;
+
+  if (paymentStatus === "paid") {
+    const allowedMethods = ["cash", "upi", "bank_transfer", "cheque", "card", "other"];
+    if (!paymentMethod || !allowedMethods.includes(paymentMethod)) {
+      const err = new Error(
+        `paymentMethod is required and must be one of: ${allowedMethods.join(", ")} when paymentStatus is "paid"`
+      );
+      err.statusCode = 400;
+      err.errorCode = "INVALID_PAYMENT_METHOD";
+      throw err;
+    }
+    order.paymentStatus = "paid";
+    order.paymentMethod = paymentMethod;
+    order.paymentReference = paymentReference || null;
+    order.paidAt = new Date();
+  } else {
+    order.paymentStatus = "pending";
+    order.paymentMethod = null;
+    order.paymentReference = null;
+    order.paidAt = null;
+  }
+
+  await order.save();
+
+  await PermissionAudit.create({
+    permissionAuditId: uuidv6(),
+    actionBy: employee._id,
+    actionByEmail: employee.email,
+    actionFor: order._id,
+    permission: "update_manual_order_payment_status",
+    action: "update",
+    meta: { orderId: order.orderId, from: oldPaymentStatus, to: order.paymentStatus },
+  });
+
+  try {
+    await sendNotification({
+      sender: employee._id,
+      permission: "sales.order.update",
+      title: "Manual Order Payment Updated",
+      message: `Manual order ${order.orderId} payment status updated to ${order.paymentStatus}`,
+      type: "MANUAL_ORDER_PAYMENT_STATUS_UPDATED",
+      entityId: order._id,
+      entityModel: "ManualOrder",
+      metadata: { orderId: order.orderId, createdBy: employee.email },
+    });
+  } catch (err) {
+    console.error("Notification failed on manual order payment status update:", err.message);
+  }
+
+  return {
+    orderId: order.orderId,
+    oldPaymentStatus,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.paymentMethod,
+    paymentReference: order.paymentReference,
+    paidAt: order.paidAt,
+  };
+};
+
+/* =========================================================
    CANCEL MANUAL ORDER (no stock to restore — nothing to look up)
 ========================================================= */
 export const cancelManualOrderService = async (orderId, currentUser, reason) => {
@@ -831,6 +924,240 @@ export const getManualOrderAnalyticsService = async (query) => {
       endDate: endDate || null,
       includeCancelled: includeCancelledBool,
       groupBy,
+    },
+  };
+};
+
+/* =========================================================
+   CUSTOMER BALANCE LEDGER
+   Groups every manual order by customer (phone number) and works out,
+   per customer, whether the company still owes them money (unrefunded
+   returns / cancellations) or the customer still owes the company
+   (unpaid orders). Nothing here needs a separate Customer collection —
+   it's all derived from ManualOrder documents already on file.
+
+   Per order:
+     - totalReturnedValue     = value of everything returned on that order
+     - pendingReturnRefund    = totalReturnedValue - amount already paid out
+                                 via refundHistory (tracked as partialRefundAmount)
+     - cancellationRefundOwed = grandTotal, only when the order was
+                                 cancelled after being paid and hasn't been
+                                 refunded yet (paymentStatus stays
+                                 "refund_pending" for cancellations)
+     - unpaidDue              = grandTotal, only when paymentStatus is
+                                 still "pending"
+
+   owedToCustomer = pendingReturnRefund + cancellationRefundOwed  (company owes)
+   owedByCustomer = unpaidDue                                     (customer owes)
+   netBalance     = owedByCustomer - owedToCustomer
+     > 0  -> "customer_owes"   (customer still owes the company)
+     < 0  -> "company_owes"    (company owes the customer a refund)
+     = 0  -> "settled"
+
+   NOTE: this reads paymentStatus/refundHistory/partialRefundAmount as the
+   source of truth. If a cancellation refund is later paid out by some other
+   means, update that order's paymentStatus (e.g. to "refunded") so it stops
+   showing up as owed here.
+========================================================= */
+export const getCustomerBalanceLedgerService = async (query) => {
+  const { startDate, endDate, search, balanceStatus, sortBy } = query;
+
+  const match = {};
+  if (startDate || endDate) {
+    match.createdAt = {};
+    if (startDate) {
+      const from = new Date(startDate);
+      if (Number.isNaN(from.getTime())) {
+        const error = new Error("Invalid startDate");
+        error.statusCode = 400;
+        error.errorCode = "VALIDATION_ERROR";
+        throw error;
+      }
+      match.createdAt.$gte = from;
+    }
+    if (endDate) {
+      const to = new Date(endDate);
+      if (Number.isNaN(to.getTime())) {
+        const error = new Error("Invalid endDate");
+        error.statusCode = 400;
+        error.errorCode = "VALIDATION_ERROR";
+        throw error;
+      }
+      to.setHours(23, 59, 59, 999);
+      match.createdAt.$lte = to;
+    }
+  }
+
+  const pipeline = [
+    { $match: match },
+    {
+      $addFields: {
+        totalReturnedValue: {
+          $sum: {
+            $map: {
+              input: { $ifNull: ["$returnRequests", []] },
+              as: "rr",
+              in: {
+                $sum: {
+                  $map: {
+                    input: { $ifNull: ["$$rr.items", []] },
+                    as: "it",
+                    in: { $multiply: ["$$it.price", "$$it.quantity"] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        pendingReturnRefund: {
+          $max: [
+            { $subtract: ["$totalReturnedValue", { $ifNull: ["$partialRefundAmount", 0] }] },
+            0,
+          ],
+        },
+        cancellationRefundOwed: {
+          $cond: [
+            {
+              $and: [
+                { $eq: ["$orderStatus", "cancelled"] },
+                { $eq: ["$paymentStatus", "refund_pending"] },
+              ],
+            },
+            { $ifNull: ["$refundAmount", 0] },
+            0,
+          ],
+        },
+        unpaidDue: {
+          $cond: [{ $eq: ["$paymentStatus", "pending"] }, "$grandTotal", 0],
+        },
+      },
+    },
+    {
+      $addFields: {
+        owedToCustomer: { $add: ["$pendingReturnRefund", "$cancellationRefundOwed"] },
+        owedByCustomer: "$unpaidDue",
+      },
+    },
+    {
+      $group: {
+        _id: "$customerPhone",
+        customerName: { $last: "$customerName" },
+        customerEmail: { $last: "$customerEmail" },
+        totalOrders: { $sum: 1 },
+        totalOrderValue: { $sum: "$grandTotal" },
+        totalReturnedValue: { $sum: "$totalReturnedValue" },
+        totalOwedToCustomer: { $sum: "$owedToCustomer" },
+        totalOwedByCustomer: { $sum: "$owedByCustomer" },
+        lastOrderAt: { $max: "$createdAt" },
+        orders: {
+          $push: {
+            orderId: "$orderId",
+            orderStatus: "$orderStatus",
+            paymentStatus: "$paymentStatus",
+            grandTotal: "$grandTotal",
+            totalReturnedValue: "$totalReturnedValue",
+            owedToCustomer: "$owedToCustomer",
+            owedByCustomer: "$owedByCustomer",
+            createdAt: "$createdAt",
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        netBalance: { $subtract: ["$totalOwedByCustomer", "$totalOwedToCustomer"] },
+      },
+    },
+    {
+      $addFields: {
+        balanceStatus: {
+          $switch: {
+            branches: [
+              { case: { $gt: ["$netBalance", 0] }, then: "customer_owes" },
+              { case: { $lt: ["$netBalance", 0] }, then: "company_owes" },
+            ],
+            default: "settled",
+          },
+        },
+      },
+    },
+  ];
+
+  if (search && search.trim()) {
+    const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    pipeline.push({
+      $match: { $or: [{ customerName: regex }, { _id: regex }, { customerEmail: regex }] },
+    });
+  }
+
+  const allowedStatusFilters = ["customer_owes", "company_owes", "settled"];
+  if (balanceStatus && allowedStatusFilters.includes(balanceStatus)) {
+    pipeline.push({ $match: { balanceStatus } });
+  }
+
+  pipeline.push({
+    $project: {
+      _id: 0,
+      customerPhone: "$_id",
+      customerName: 1,
+      customerEmail: 1,
+      totalOrders: 1,
+      totalOrderValue: 1,
+      totalReturnedValue: 1,
+      totalOwedToCustomer: 1,
+      totalOwedByCustomer: 1,
+      netBalance: 1,
+      balanceStatus: 1,
+      lastOrderAt: 1,
+      orders: 1,
+    },
+  });
+
+  pipeline.push({
+    $sort:
+      sortBy === "name"
+        ? { customerName: 1 }
+        : sortBy === "recent"
+        ? { lastOrderAt: -1 }
+        : { netBalance: -1 },
+  });
+
+  const customers = await ManualOrder.aggregate(pipeline);
+
+  const summary = customers.reduce(
+    (acc, c) => {
+      if (c.balanceStatus === "customer_owes") {
+        acc.totalCustomerOwesCompany += c.netBalance;
+        acc.customersWhoOwe += 1;
+      } else if (c.balanceStatus === "company_owes") {
+        acc.totalCompanyOwesCustomers += Math.abs(c.netBalance);
+        acc.customersOwed += 1;
+      } else {
+        acc.settledCustomers += 1;
+      }
+      return acc;
+    },
+    {
+      totalCustomerOwesCompany: 0,
+      totalCompanyOwesCustomers: 0,
+      customersWhoOwe: 0,
+      customersOwed: 0,
+      settledCustomers: 0,
+    }
+  );
+
+  return {
+    customers,
+    summary: { ...summary, totalCustomers: customers.length },
+    filters: {
+      startDate: startDate || null,
+      endDate: endDate || null,
+      search: search || null,
+      balanceStatus: balanceStatus || null,
     },
   };
 };
