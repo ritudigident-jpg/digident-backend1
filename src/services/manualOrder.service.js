@@ -6,7 +6,120 @@ import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
 import { sendNotification } from "./notification.service.js";
 import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
 import { orderConfirmationTemplate } from "../config/templates/orderConfirmationTemplate.js";
+import { createInvoiceService, updateInvoiceService } from "./invoice.service.js";
 
+/* =========================================================
+   INVOICE INTEGRATION HELPERS
+   Uses your existing Invoice model/service as-is (services/invoice.service.js).
+   That schema expects GST-INCLUSIVE per-item prices and computes its own
+   totals via a pre-save hook — it does NOT read a pre-computed grandTotal.
+   Manual orders track GST as one flat order-level amount instead of
+   per-item, so this mapping applies the order's overall gstPercentage to
+   every line item as a best-effort match. If your manual-order GST setup
+   differs from that assumption, adjust buildInvoiceItemsFromOrder() below.
+========================================================= */
+const buildInvoiceItemsFromOrder = (order) =>
+  (order.items || [])
+    .filter((i) => Number(i.quantity) - Number(i.returnedQuantity || 0) > 0)
+    .map((i) => ({
+      description: i.variantName ? `${i.productName} - ${i.variantName}` : i.productName,
+      qty: Number(i.quantity) - Number(i.returnedQuantity || 0),
+      price: Number(i.price), // treated as GST-inclusive by the invoice schema
+      discountPercent: 0,
+      gstType: "IGST",
+      gstPercent: Number(order.gstPercentage) || 0,
+    }));
+
+const buildAddressString = (addr = {}) =>
+  [addr.street, addr.area, addr.city, addr.state, addr.pincode, addr.country].filter(Boolean).join(", ");
+
+/**
+ * Creates the invoice right after a manual order is placed, using your
+ * existing createInvoiceService. Non-blocking — failures here are logged
+ * but never roll back the order itself.
+ */
+const generateInvoiceForOrder = async (order) => {
+  const items = buildInvoiceItemsFromOrder(order);
+  if (items.length === 0) return null;
+
+  const invoicePayload = {
+    billTo: {
+      companyName: order.organizationName || order.customerName,
+      address: buildAddressString(order.billingAddress || order.shippingAddress),
+      gstin: order.gstNumber || "",
+      contactPerson: order.customerName,
+      contactNumber: order.customerPhone,
+    },
+    items,
+    summary: {
+      freightCost: Number(order.shippingCharge) || 0,
+      paidAmount: 0, // patched below once the schema has computed totalPayAmount
+    },
+    notes: `Manual Order: ${order.orderId}`,
+    status: "issued",
+  };
+
+  const invoice = await createInvoiceService(invoicePayload);
+
+  // If the order was paid up front, mark the invoice fully paid using the
+  // total the schema just computed for us.
+  if (order.paymentStatus === "paid") {
+    await updateInvoiceService({
+      invoiceId: invoice.invoiceId,
+      data: {
+        summary: { paidAmount: invoice.summary.totalPayAmount },
+        status: "paid",
+      },
+    });
+  }
+
+  order.invoiceId = invoice.invoiceId;
+  await order.save();
+
+  return invoice;
+};
+
+/**
+ * Re-syncs the invoice after a return/partial return: rebuilds the line
+ * items to reflect only what's still active on the order (so the schema's
+ * pre-save hook recomputes totals to match), and re-derives paidAmount from
+ * how much the company has actually retained after any refunds already
+ * paid out (order.partialRefundAmount).
+ */
+const syncInvoiceForReturn = async (order) => {
+  if (!order.invoiceId) return null; // order predates invoicing
+
+  const items = buildInvoiceItemsFromOrder(order);
+  const wasEverFullyPaid = ["paid", "partial_refunded", "refunded"].includes(order.paymentStatus);
+  const grossPaid = wasEverFullyPaid ? Number(order.grandTotal || 0) : 0;
+  const refunded = Number(order.partialRefundAmount || 0);
+  const netPaid = Math.max(grossPaid - refunded, 0);
+
+  const status = items.length === 0 ? "cancelled" : undefined; // let paidAmount decide paid/partially_paid otherwise
+
+  const updated = await updateInvoiceService({
+    invoiceId: order.invoiceId,
+    data: {
+      items: items.length > 0 ? items : undefined,
+      summary: { paidAmount: netPaid },
+      ...(status ? { status } : {}),
+      notes: `Adjusted for return on ${new Date().toLocaleDateString("en-IN")}`,
+    },
+  });
+
+  // items.length === 0 has no valid items array to satisfy the invoice's
+  // own "min 1 item" validation on manual edits from the UI later, but the
+  // service layer itself doesn't enforce that on updateInvoiceService, so
+  // status "cancelled" with an empty items array is left as-is here.
+  if (!status && updated) {
+    const newStatus = Number(updated.summary?.amountToPay) <= 0 ? "paid" : "partially_paid";
+    if (updated.status !== newStatus) {
+      await updateInvoiceService({ invoiceId: order.invoiceId, data: { status: newStatus } });
+    }
+  }
+
+  return updated;
+};
 const requiredAddrFields = ["fullName", "phone"]; // street/city/etc optional since it's manual
 
 /* =========================================================
@@ -196,6 +309,13 @@ export const createManualOrderService = async (data, currentUser) => {
     },
   });
 
+  /* ---------- AUTO-GENERATE INVOICE (non-blocking) ---------- */
+  try {
+    await generateInvoiceForOrder(order);
+  } catch (err) {
+    console.error("Invoice auto-creation failed on manual order create:", err.message);
+  }
+
   /* ---------- NOTIFICATION ---------- */
   try {
     await sendNotification({
@@ -330,10 +450,10 @@ export const updateManualOrderStatusService = async (data, currentUser) => {
 
   order.orderStatus = status;
   order.statusUpdatedAt = new Date();
-  if (status === "delivered" && order.paymentStatus === "pending") {
-    order.paymentStatus = "paid";
-    order.paidAt = new Date();
-  }
+  // NOTE: previously auto-marked paymentStatus "paid" here when an order
+  // hit "delivered" (assuming COD-style payment on delivery). Everything in
+  // this system is staff-driven, so that assumption doesn't hold — payment
+  // status now only ever changes via the explicit payment-status endpoint.
 
   await order.save();
 
@@ -639,6 +759,13 @@ export const createManualReturnService = async (data, currentUser) => {
   }
 
   await order.save();
+
+  /* ---------- AUTO-ADJUST INVOICE (non-blocking) ---------- */
+  try {
+    await syncInvoiceForReturn(order);
+  } catch (err) {
+    console.error("Invoice auto-update failed on manual return:", err.message);
+  }
 
   await PermissionAudit.create({
     permissionAuditId: uuidv6(),
@@ -1044,7 +1171,17 @@ export const getCustomerBalanceLedgerService = async (query) => {
     },
     {
       $group: {
-        _id: "$customerPhone",
+        // Grouped by phone + normalized name together — not phone alone —
+        // so two different people who happen to share a phone number
+        // (e.g. a clinic's front-desk line used by multiple doctors, or
+        // family members) don't get their balances merged into one.
+        // Same person typed with different capitalization/spacing still
+        // groups correctly since the name is lowercased + trimmed first.
+        _id: {
+          phone: "$customerPhone",
+          normalizedName: { $trim: { input: { $toLower: "$customerName" } } },
+        },
+        customerPhone: { $last: "$customerPhone" },
         customerName: { $last: "$customerName" },
         customerEmail: { $last: "$customerEmail" },
         totalOrders: { $sum: 1 },
@@ -1090,7 +1227,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
   if (search && search.trim()) {
     const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     pipeline.push({
-      $match: { $or: [{ customerName: regex }, { _id: regex }, { customerEmail: regex }] },
+      $match: { $or: [{ customerName: regex }, { customerPhone: regex }, { customerEmail: regex }] },
     });
   }
 
@@ -1102,7 +1239,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
   pipeline.push({
     $project: {
       _id: 0,
-      customerPhone: "$_id",
+      customerPhone: 1,
       customerName: 1,
       customerEmail: 1,
       totalOrders: 1,
