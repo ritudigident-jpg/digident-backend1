@@ -1385,13 +1385,15 @@ export const settleOrderRefundService = async (data, currentUser) => {
   order.partialRefundAmount = Number(order.partialRefundAmount || 0) + creditAmount;
   order.paymentStatus = creditAmount >= outstanding - 0.01 ? "refunded" : "partial_refunded";
   order.refundedAt = new Date();
+  const refundId = `MANUAL-${uuidv6()}`;
   order.refundHistory.push({
-    refundId: `MANUAL-${uuidv6()}`,
+    refundId,
     amount: creditAmount,
     method,
     refundedBy: employee.email,
     refundedAt: new Date(),
     refundStatus: "processed",
+    appliedToOrderId: appliedToOrderId || null,
   });
   order.notes = [
     order.notes,
@@ -1420,10 +1422,16 @@ export const settleOrderRefundService = async (data, currentUser) => {
   });
 
   return {
+    refundId,
     orderId: order.orderId,
+    customerName: order.customerName,
+    customerPhone: order.customerPhone,
+    customerEmail: order.customerEmail,
     paymentStatus: order.paymentStatus,
     amountSettled: creditAmount,
     method,
+    refundedBy: employee.email,
+    appliedToOrderId: appliedToOrderId || null,
     remainingOwed: Math.max(outstanding - creditAmount, 0),
   };
 };
@@ -1431,6 +1439,87 @@ export const settleOrderRefundService = async (data, currentUser) => {
 // Old name kept as an alias — CreateOrderPage's credit-apply flow already
 // calls this via the same route/controller.
 export const settleRefundWithCreditService = settleOrderRefundService;
+
+/* =========================================================
+   CREDIT NOTES LIST
+   Every refundHistory entry across every order where method === "credit_note"
+   — i.e. every time staff recorded "customer will take it next time"
+   instead of a cash payout. Used to power a dedicated Credit Notes page and
+   to let staff re-download a specific credit note's PDF later.
+========================================================= */
+export const getCreditNotesService = async (query) => {
+  const { search, startDate, endDate } = query;
+
+  const match = {};
+  if (startDate || endDate) {
+    match["refundHistory.refundedAt"] = {};
+    if (startDate) {
+      const from = new Date(startDate);
+      if (!Number.isNaN(from.getTime())) match["refundHistory.refundedAt"].$gte = from;
+    }
+    if (endDate) {
+      const to = new Date(endDate);
+      if (!Number.isNaN(to.getTime())) {
+        to.setHours(23, 59, 59, 999);
+        match["refundHistory.refundedAt"].$lte = to;
+      }
+    }
+  }
+
+  const pipeline = [
+    { $unwind: "$refundHistory" },
+    { $match: { "refundHistory.method": "credit_note", ...match } },
+    {
+      $project: {
+        _id: 0,
+        refundId: "$refundHistory.refundId",
+        amount: "$refundHistory.amount",
+        refundedBy: "$refundHistory.refundedBy",
+        refundedAt: "$refundHistory.refundedAt",
+        refundStatus: "$refundHistory.refundStatus",
+        appliedToOrderId: "$refundHistory.appliedToOrderId",
+        sourceOrderId: "$orderId",
+        sourceOrderGrandTotal: "$grandTotal",
+        customerName: "$customerName",
+        customerPhone: "$customerPhone",
+        customerEmail: "$customerEmail",
+      },
+    },
+    { $sort: { refundedAt: -1 } },
+  ];
+
+  if (search && search.trim()) {
+    const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    pipeline.push({
+      $match: {
+        $or: [
+          { customerName: regex },
+          { customerPhone: regex },
+          { customerEmail: regex },
+          { sourceOrderId: regex },
+          { refundId: regex },
+        ],
+      },
+    });
+  }
+
+  const creditNotes = await ManualOrder.aggregate(pipeline);
+
+  const totalIssued = creditNotes.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  const totalApplied = creditNotes
+    .filter((c) => c.appliedToOrderId)
+    .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+
+  return {
+    creditNotes,
+    summary: {
+      totalCreditNotes: creditNotes.length,
+      totalIssued,
+      totalApplied,
+      totalUnapplied: Math.max(totalIssued - totalApplied, 0),
+    },
+  };
+};
 
 /* =========================================================
    MANUAL COURIER UPDATE

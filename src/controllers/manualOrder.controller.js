@@ -10,6 +10,7 @@ import {
   getManualOrderAnalyticsService,
   getCustomerBalanceLedgerService,
   settleOrderRefundService,
+  getCreditNotesService,
 } from "../services/manualOrder.service.js";
 import { sendError, handleError } from "../helpers/error.helper.js";
 import { sendSuccess } from "../helpers/response.helper.js";
@@ -253,6 +254,22 @@ export const settleOrderCredit = async (req, res) => {
       req.user
     );
     return sendSuccess(res, data, 200, "Refund settled successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function getCreditNotes
+ * @description Every "customer will take it next time" credit note issued
+ * across all orders — used to power a dedicated Credit Notes page.
+ *
+ * query: { search?: string, startDate?: ISO date, endDate?: ISO date }
+ */
+export const getCreditNotes = async (req, res) => {
+  try {
+    const data = await getCreditNotesService(req.query);
+    return sendSuccess(res, data, 200, "Credit notes fetched successfully");
   } catch (error) {
     return handleError(res, error);
   }

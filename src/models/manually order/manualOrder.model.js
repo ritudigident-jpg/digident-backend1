@@ -133,9 +133,19 @@ const manualOrderSchema = new mongoose.Schema(
         refundedBy: String,
         refundedAt: Date,
         refundStatus: String,
+        // Only meaningful when method === "credit_note": which new order
+        // this credit was actually applied to (set by settleOrderRefundService
+        // when staff apply an existing credit at order-creation time).
+        appliedToOrderId: { type: String, default: null },
       },
     ],
     refundedAt: { type: Date, default: null },
+
+    /* ---------- INVOICE LINK ----------
+       Set automatically once an invoice is generated for this order (see
+       manualOrder.service.js -> generateInvoiceForOrder). Stores the real
+       Invoice model's invoiceId (UUID), used to fetch/update that invoice. */
+    invoiceId: { type: String, default: null },
 
     /* ---------- META ---------- */
     isManualOrder: { type: Boolean, default: true },
@@ -150,4 +160,3 @@ const manualOrderSchema = new mongoose.Schema(
 );
 
 export default mongoose.model("ManualOrder", manualOrderSchema);
-
