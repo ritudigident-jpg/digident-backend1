@@ -9,6 +9,7 @@ import {
   updateManualOrderCourierService,
   getManualOrderAnalyticsService,
   getCustomerBalanceLedgerService,
+  settleRefundWithCreditService,
 } from "../services/manualOrder.service.js";
 import { sendError, handleError } from "../helpers/error.helper.js";
 import { sendSuccess } from "../helpers/response.helper.js";
@@ -213,6 +214,34 @@ export const getCustomerBalanceLedger = async (req, res) => {
   try {
     const data = await getCustomerBalanceLedgerService(req.query);
     return sendSuccess(res, data, 200, "Customer balance ledger fetched successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function settleOrderCredit
+ * @description Marks part or all of a pending refund on an old order as
+ * "settled via store credit" instead of an actual cash refund — used when
+ * a customer agrees to take the value off their next order instead of a
+ * cash payout right now.
+ *
+ * body: { amount: number, appliedToOrderId?: string, notes?: string }
+ */
+export const settleOrderCredit = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { amount, appliedToOrderId, notes } = req.body;
+
+    if (!orderId) {
+      return sendError(res, { message: "orderId is required", statusCode: 400, errorCode: "VALIDATION_ERROR" });
+    }
+    if (!amount || Number(amount) <= 0) {
+      return sendError(res, { message: "amount must be a positive number", statusCode: 400, errorCode: "VALIDATION_ERROR" });
+    }
+
+    const data = await settleRefundWithCreditService({ orderId, amount, appliedToOrderId, notes }, req.user);
+    return sendSuccess(res, data, 200, "Credit applied and refund settled successfully");
   } catch (error) {
     return handleError(res, error);
   }

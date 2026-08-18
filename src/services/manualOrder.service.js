@@ -1300,6 +1300,109 @@ export const getCustomerBalanceLedgerService = async (query) => {
 };
 
 /* =========================================================
+   SETTLE A PENDING REFUND WITH STORE CREDIT
+   Covers the "customer said they'll take it next time" case: instead of
+   physically handing back cash for a return/cancellation, staff apply the
+   amount they're owed as a discount on a new order. This just records that
+   the old order's refund has been settled that way — it does NOT touch the
+   new order's numbers; staff still enter the discount manually on the new
+   order (see CreateOrderPage). This only exists so the old order stops
+   showing up as "we owe customer" once the credit has actually been used.
+========================================================= */
+export const settleRefundWithCreditService = async (data, currentUser) => {
+  const { orderId, amount, appliedToOrderId, notes } = data;
+
+  const employee = await Employee.findOne({ email: currentUser.email });
+  if (!employee) {
+    const error = new Error("Employee not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const order = await ManualOrder.findOne({ orderId });
+  if (!order) {
+    const error = new Error("Manual order not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (!["refund_pending", "partial_refunded"].includes(order.paymentStatus)) {
+    const error = new Error(`This order has no pending refund to settle (currently "${order.paymentStatus}")`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const creditAmount = Number(amount);
+  if (!creditAmount || creditAmount <= 0) {
+    const error = new Error("amount must be a positive number");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const isCancellation = order.orderStatus === "cancelled";
+  let outstanding;
+
+  if (isCancellation) {
+    outstanding = Math.max(Number(order.refundAmount || 0) - Number(order.partialRefundAmount || 0), 0);
+  } else {
+    const totalReturnedValue = (order.returnRequests || []).reduce(
+      (sum, rr) =>
+        sum + (rr.items || []).reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0),
+      0
+    );
+    outstanding = Math.max(totalReturnedValue - Number(order.partialRefundAmount || 0), 0);
+  }
+
+  if (creditAmount > outstanding + 0.01) {
+    const error = new Error(
+      `Credit amount (${creditAmount}) is more than what's actually owed on this order (${outstanding.toFixed(2)})`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  order.partialRefundAmount = Number(order.partialRefundAmount || 0) + creditAmount;
+  order.paymentStatus = creditAmount >= outstanding - 0.01 ? "refunded" : "partial_refunded";
+  order.refundedAt = new Date();
+  order.refundHistory.push({
+    refundId: `CREDIT-${uuidv6()}`,
+    amount: creditAmount,
+    method: "credit_note",
+    refundedBy: employee.email,
+    refundedAt: new Date(),
+    refundStatus: "processed",
+  });
+  order.notes = [
+    order.notes,
+    `₹${creditAmount} credited toward ${appliedToOrderId ? `order ${appliedToOrderId}` : "a later purchase"}${
+      notes ? ` — ${notes}` : ""
+    }`,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  await order.save();
+
+  await PermissionAudit.create({
+    permissionAuditId: uuidv6(),
+    actionBy: employee._id,
+    actionByEmail: employee.email,
+    actionFor: order._id,
+    actionForEmail: order.customerEmail,
+    permission: "manual_order_credit_settle",
+    action: "update",
+    meta: { orderId: order.orderId, creditAmount, appliedToOrderId: appliedToOrderId || null },
+  });
+
+  return {
+    orderId: order.orderId,
+    paymentStatus: order.paymentStatus,
+    creditAmountApplied: creditAmount,
+    remainingOwed: Math.max(outstanding - creditAmount, 0),
+  };
+};
+
+/* =========================================================
    MANUAL COURIER UPDATE
 ========================================================= */
 export const updateManualOrderCourierService = async (data, currentUser) => {

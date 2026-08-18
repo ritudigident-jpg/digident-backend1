@@ -10,6 +10,7 @@ import {
   updateManualOrderCourier,
   getManualOrderAnalytics,
   getCustomerBalanceLedger,
+  settleOrderCredit,
 } from "../../controllers/manualOrder.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
@@ -25,6 +26,7 @@ router.patch("/status/:orderId", auth, checkPermission, updateManualOrderStatus)
 router.patch("/payment-status/:orderId", auth, checkPermission, updateManualOrderPaymentStatus);
 router.put("/cancel/:orderId", auth, checkPermission, cancelManualOrder);
 router.put("/courier/:orderId", auth, checkPermission, updateManualOrderCourier);
+router.put("/credit-settle/:orderId", auth, checkPermission, settleOrderCredit);
 router.post("/return", auth, checkPermission, createManualReturn);
 
 export default router;
