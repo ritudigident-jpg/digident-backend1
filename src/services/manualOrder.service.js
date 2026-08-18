@@ -1309,8 +1309,22 @@ export const getCustomerBalanceLedgerService = async (query) => {
    order (see CreateOrderPage). This only exists so the old order stops
    showing up as "we owe customer" once the credit has actually been used.
 ========================================================= */
-export const settleRefundWithCreditService = async (data, currentUser) => {
-  const { orderId, amount, appliedToOrderId, notes } = data;
+/* =========================================================
+   SETTLE A PENDING REFUND (cash payout OR store credit)
+   Covers both:
+     - "I've physically handed the customer their refund" (method: cash/upi/
+       bank_transfer/card/other) — the normal case after a return/cancel.
+     - "Customer said they'll take it next time" (method: credit_note) —
+       the amount is applied as a discount on a new order instead (see
+       CreateOrderPage's credit lookup), and this just records that the old
+       order's refund has now been used up.
+   Either way, this is the ONLY way a "refund_pending" / "partial_refunded"
+   order moves toward "refunded" — createManualReturnService only sets that
+   automatically when refundNow was ticked at return time; if it wasn't,
+   this is how staff go back and settle it later.
+========================================================= */
+export const settleOrderRefundService = async (data, currentUser) => {
+  const { orderId, amount, method = "credit_note", reference, appliedToOrderId, notes } = data;
 
   const employee = await Employee.findOne({ email: currentUser.email });
   if (!employee) {
@@ -1328,6 +1342,13 @@ export const settleRefundWithCreditService = async (data, currentUser) => {
 
   if (!["refund_pending", "partial_refunded"].includes(order.paymentStatus)) {
     const error = new Error(`This order has no pending refund to settle (currently "${order.paymentStatus}")`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const allowedMethods = ["cash", "upi", "bank_transfer", "card", "other", "credit_note"];
+  if (!allowedMethods.includes(method)) {
+    const error = new Error(`method must be one of: ${allowedMethods.join(", ")}`);
     error.statusCode = 400;
     throw error;
   }
@@ -1355,7 +1376,7 @@ export const settleRefundWithCreditService = async (data, currentUser) => {
 
   if (creditAmount > outstanding + 0.01) {
     const error = new Error(
-      `Credit amount (${creditAmount}) is more than what's actually owed on this order (${outstanding.toFixed(2)})`
+      `Amount (${creditAmount}) is more than what's actually owed on this order (${outstanding.toFixed(2)})`
     );
     error.statusCode = 400;
     throw error;
@@ -1365,18 +1386,22 @@ export const settleRefundWithCreditService = async (data, currentUser) => {
   order.paymentStatus = creditAmount >= outstanding - 0.01 ? "refunded" : "partial_refunded";
   order.refundedAt = new Date();
   order.refundHistory.push({
-    refundId: `CREDIT-${uuidv6()}`,
+    refundId: `MANUAL-${uuidv6()}`,
     amount: creditAmount,
-    method: "credit_note",
+    method,
     refundedBy: employee.email,
     refundedAt: new Date(),
     refundStatus: "processed",
   });
   order.notes = [
     order.notes,
-    `₹${creditAmount} credited toward ${appliedToOrderId ? `order ${appliedToOrderId}` : "a later purchase"}${
-      notes ? ` — ${notes}` : ""
-    }`,
+    method === "credit_note"
+      ? `₹${creditAmount} credited toward ${appliedToOrderId ? `order ${appliedToOrderId}` : "a later purchase"}${
+          notes ? ` — ${notes}` : ""
+        }`
+      : `₹${creditAmount} refunded via ${method}${reference ? ` (ref: ${reference})` : ""}${
+          notes ? ` — ${notes}` : ""
+        }`,
   ]
     .filter(Boolean)
     .join(" | ");
@@ -1389,18 +1414,23 @@ export const settleRefundWithCreditService = async (data, currentUser) => {
     actionByEmail: employee.email,
     actionFor: order._id,
     actionForEmail: order.customerEmail,
-    permission: "manual_order_credit_settle",
+    permission: "manual_order_refund_settle",
     action: "update",
-    meta: { orderId: order.orderId, creditAmount, appliedToOrderId: appliedToOrderId || null },
+    meta: { orderId: order.orderId, amount: creditAmount, method, appliedToOrderId: appliedToOrderId || null },
   });
 
   return {
     orderId: order.orderId,
     paymentStatus: order.paymentStatus,
-    creditAmountApplied: creditAmount,
+    amountSettled: creditAmount,
+    method,
     remainingOwed: Math.max(outstanding - creditAmount, 0),
   };
 };
+
+// Old name kept as an alias — CreateOrderPage's credit-apply flow already
+// calls this via the same route/controller.
+export const settleRefundWithCreditService = settleOrderRefundService;
 
 /* =========================================================
    MANUAL COURIER UPDATE

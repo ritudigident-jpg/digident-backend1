@@ -9,7 +9,7 @@ import {
   updateManualOrderCourierService,
   getManualOrderAnalyticsService,
   getCustomerBalanceLedgerService,
-  settleRefundWithCreditService,
+  settleOrderRefundService,
 } from "../services/manualOrder.service.js";
 import { sendError, handleError } from "../helpers/error.helper.js";
 import { sendSuccess } from "../helpers/response.helper.js";
@@ -221,17 +221,25 @@ export const getCustomerBalanceLedger = async (req, res) => {
 
 /**
  * @function settleOrderCredit
- * @description Marks part or all of a pending refund on an old order as
- * "settled via store credit" instead of an actual cash refund — used when
- * a customer agrees to take the value off their next order instead of a
- * cash payout right now.
+ * @description Marks part or all of a pending refund on an order as
+ * settled — either an actual cash/UPI/bank payout ("I've physically
+ * refunded this"), or store credit applied to a new order ("customer will
+ * take it next time"). This is the only way a "refund_pending" /
+ * "partial_refunded" order can move to "refunded" once the return itself
+ * has already been recorded.
  *
- * body: { amount: number, appliedToOrderId?: string, notes?: string }
+ * body: {
+ *   amount: number,
+ *   method?: "cash"|"upi"|"bank_transfer"|"card"|"other"|"credit_note" (default "credit_note"),
+ *   reference?: string,       // payment reference, for cash-style methods
+ *   appliedToOrderId?: string, // the new order this credit was used on
+ *   notes?: string
+ * }
  */
 export const settleOrderCredit = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { amount, appliedToOrderId, notes } = req.body;
+    const { amount, method, reference, appliedToOrderId, notes } = req.body;
 
     if (!orderId) {
       return sendError(res, { message: "orderId is required", statusCode: 400, errorCode: "VALIDATION_ERROR" });
@@ -240,8 +248,11 @@ export const settleOrderCredit = async (req, res) => {
       return sendError(res, { message: "amount must be a positive number", statusCode: 400, errorCode: "VALIDATION_ERROR" });
     }
 
-    const data = await settleRefundWithCreditService({ orderId, amount, appliedToOrderId, notes }, req.user);
-    return sendSuccess(res, data, 200, "Credit applied and refund settled successfully");
+    const data = await settleOrderRefundService(
+      { orderId, amount, method, reference, appliedToOrderId, notes },
+      req.user
+    );
+    return sendSuccess(res, data, 200, "Refund settled successfully");
   } catch (error) {
     return handleError(res, error);
   }
