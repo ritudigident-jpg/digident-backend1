@@ -1421,9 +1421,25 @@ export const settleOrderRefundService = async (data, currentUser) => {
     meta: { orderId: order.orderId, amount: creditAmount, method, appliedToOrderId: appliedToOrderId || null },
   });
 
+  // If this credit was applied straight onto a new order (the
+  // CreateOrderPage "Check credit" flow), pull that order's details too so
+  // the instantly-downloaded PDF shows real context, not just an ID.
+  let appliedOrderDate = null;
+  let appliedOrderGrandTotal = null;
+  let appliedOrderItems = [];
+  if (appliedToOrderId) {
+    const appliedOrder = await ManualOrder.findOne({ orderId: appliedToOrderId }).lean();
+    if (appliedOrder) {
+      appliedOrderDate = appliedOrder.createdAt;
+      appliedOrderGrandTotal = appliedOrder.grandTotal;
+      appliedOrderItems = appliedOrder.items || [];
+    }
+  }
+
   return {
     refundId,
     orderId: order.orderId,
+    orderDate: order.createdAt,
     customerName: order.customerName,
     customerPhone: order.customerPhone,
     customerEmail: order.customerEmail,
@@ -1432,6 +1448,9 @@ export const settleOrderRefundService = async (data, currentUser) => {
     method,
     refundedBy: employee.email,
     appliedToOrderId: appliedToOrderId || null,
+    appliedOrderDate,
+    appliedOrderGrandTotal,
+    appliedOrderItems,
     remainingOwed: Math.max(outstanding - creditAmount, 0),
     // What was actually returned on this order — so a downloaded credit
     // note PDF shows real products, not just a bare amount.
@@ -1482,6 +1501,7 @@ export const getCreditNotesService = async (query) => {
         refundStatus: "$refundHistory.refundStatus",
         appliedToOrderId: "$refundHistory.appliedToOrderId",
         sourceOrderId: "$orderId",
+        sourceOrderDate: "$createdAt",
         sourceOrderGrandTotal: "$grandTotal",
         customerName: "$customerName",
         customerPhone: "$customerPhone",
@@ -1500,6 +1520,26 @@ export const getCreditNotesService = async (query) => {
         },
       },
     },
+    // Pull in the actual new order this credit was spent on — a bare order
+    // ID means nothing to a customer, they need to see what they bought
+    // with it and when.
+    {
+      $lookup: {
+        from: ManualOrder.collection.name,
+        localField: "appliedToOrderId",
+        foreignField: "orderId",
+        as: "_appliedOrder",
+      },
+    },
+    { $unwind: { path: "$_appliedOrder", preserveNullAndEmptyArrays: true } },
+    {
+      $addFields: {
+        appliedOrderDate: "$_appliedOrder.createdAt",
+        appliedOrderGrandTotal: "$_appliedOrder.grandTotal",
+        appliedOrderItems: { $ifNull: ["$_appliedOrder.items", []] },
+      },
+    },
+    { $project: { _appliedOrder: 0 } },
     { $sort: { refundedAt: -1 } },
   ];
 
