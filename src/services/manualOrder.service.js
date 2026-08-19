@@ -1433,6 +1433,9 @@ export const settleOrderRefundService = async (data, currentUser) => {
     refundedBy: employee.email,
     appliedToOrderId: appliedToOrderId || null,
     remainingOwed: Math.max(outstanding - creditAmount, 0),
+    // What was actually returned on this order — so a downloaded credit
+    // note PDF shows real products, not just a bare amount.
+    returnedItems: (order.returnRequests || []).reduce((all, rr) => all.concat(rr.items || []), []),
   };
 };
 
@@ -1483,6 +1486,18 @@ export const getCreditNotesService = async (query) => {
         customerName: "$customerName",
         customerPhone: "$customerPhone",
         customerEmail: "$customerEmail",
+        // Every item ever returned on this order (across all its return
+        // requests) — so a credit note actually shows WHAT the credit is
+        // for, not just a bare rupee amount. Flattened into one list since
+        // a single credit-note settlement usually covers everything owed
+        // on the order at that point, not just one specific return.
+        returnedItems: {
+          $reduce: {
+            input: { $ifNull: ["$returnRequests", []] },
+            initialValue: [],
+            in: { $concatArrays: ["$$value", { $ifNull: ["$$this.items", []] }] },
+          },
+        },
       },
     },
     { $sort: { refundedAt: -1 } },
