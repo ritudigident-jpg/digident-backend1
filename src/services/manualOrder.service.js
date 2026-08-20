@@ -371,6 +371,40 @@ export const getManualOrderService = async (orderId) => {
     error.statusCode = 404;
     throw error;
   }
+
+  // Reverse lookup: did some OTHER order's return get settled as store
+  // credit that was then spent on THIS order? This is looked up fresh every
+  // time (not relying on anything stashed on this order itself), so it
+  // works for every order — including ones created before this lookup
+  // existed — not just ones created going forward.
+  const creditsReceived = await ManualOrder.aggregate([
+    { $unwind: "$refundHistory" },
+    {
+      $match: {
+        "refundHistory.method": "credit_note",
+        "refundHistory.appliedToOrderId": orderId,
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        sourceOrderId: "$orderId",
+        amount: "$refundHistory.amount",
+        refundedAt: "$refundHistory.refundedAt",
+        // What was actually returned to generate this credit — so it never
+        // shows up as just a bare order ID with no context.
+        returnedItems: {
+          $reduce: {
+            input: { $ifNull: ["$returnRequests", []] },
+            initialValue: [],
+            in: { $concatArrays: ["$$value", { $ifNull: ["$$this.items", []] }] },
+          },
+        },
+      },
+    },
+  ]);
+  order.creditsReceived = creditsReceived;
+
   return order;
 };
 
