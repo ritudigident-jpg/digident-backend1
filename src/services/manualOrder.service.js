@@ -19,17 +19,34 @@ import Invoice from "../models/manage/invoice.model.js";
    every line item as a best-effort match. If your manual-order GST setup
    differs from that assumption, adjust buildInvoiceItemsFromOrder() below.
 ========================================================= */
-const buildInvoiceItemsFromOrder = (order) =>
-  (order.items || [])
-    .filter((i) => Number(i.quantity) - Number(i.returnedQuantity || 0) > 0)
-    .map((i) => ({
-      description: i.variantName ? `${i.productName} - ${i.variantName}` : i.productName,
-      qty: Number(i.quantity) - Number(i.returnedQuantity || 0),
-      price: Number(i.price), // treated as GST-inclusive by the invoice schema
-      discountPercent: 0,
-      gstType: "IGST",
-      gstPercent: Number(order.gstPercentage) || 0,
-    }));
+const buildInvoiceItemsFromOrder = (order) => {
+  const activeItems = (order.items || []).filter(
+    (i) => Number(i.quantity) - Number(i.returnedQuantity || 0) > 0
+  );
+
+  // order.discount is a single flat rupee amount off the whole order (this
+  // is where a manual discount OR an applied store credit both end up —
+  // see CreateOrderPage). The invoice schema only understands a
+  // per-item discountPercent, so spread that flat amount across every
+  // active item as an equivalent percentage. Without this, the invoice's
+  // own total would always equal the raw item prices and completely miss
+  // any discount/credit that was actually applied on the order.
+  const subtotal = activeItems.reduce(
+    (sum, i) => sum + Number(i.price) * (Number(i.quantity) - Number(i.returnedQuantity || 0)),
+    0
+  );
+  const discountPercent =
+    subtotal > 0 ? Math.min(100, (Math.max(Number(order.discount) || 0, 0) / subtotal) * 100) : 0;
+
+  return activeItems.map((i) => ({
+    description: i.variantName ? `${i.productName} - ${i.variantName}` : i.productName,
+    qty: Number(i.quantity) - Number(i.returnedQuantity || 0),
+    price: Number(i.price), // treated as GST-inclusive by the invoice schema
+    discountPercent,
+    gstType: "IGST",
+    gstPercent: Number(order.gstPercentage) || 0,
+  }));
+};
 
 const buildAddressString = (addr = {}) =>
   [addr.street, addr.area, addr.city, addr.state, addr.pincode, addr.country].filter(Boolean).join(", ");
