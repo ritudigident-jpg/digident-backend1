@@ -1452,6 +1452,7 @@ export const settleOrderRefundService = async (data, currentUser) => {
     appliedOrderGrandTotal,
     appliedOrderItems,
     remainingOwed: Math.max(outstanding - creditAmount, 0),
+    sourceOrderGstPercentage: order.gstPercentage || 0,
     // What was actually returned on this order — so a downloaded credit
     // note PDF shows real products, not just a bare amount.
     returnedItems: (order.returnRequests || []).reduce((all, rr) => all.concat(rr.items || []), []),
@@ -1503,6 +1504,7 @@ export const getCreditNotesService = async (query) => {
         sourceOrderId: "$orderId",
         sourceOrderDate: "$createdAt",
         sourceOrderGrandTotal: "$grandTotal",
+        sourceOrderGstPercentage: "$gstPercentage",
         customerName: "$customerName",
         customerPhone: "$customerPhone",
         customerEmail: "$customerEmail",
