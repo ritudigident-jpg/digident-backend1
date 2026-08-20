@@ -87,16 +87,38 @@ const generateInvoiceForOrder = async (order) => {
  * how much the company has actually retained after any refunds already
  * paid out (order.partialRefundAmount).
  */
-const syncInvoiceForReturn = async (order) => {
+/**
+ * The ONE place that keeps an order's linked real Invoice in sync with
+ * whatever's currently true about the order — items still active (after
+ * any returns), and how much the company has actually net-retained after
+ * any refunds/credits paid out. Called after EVERY mutation that could
+ * change either of those: order creation, a return, a manual payment-status
+ * change, a refund/credit settlement, or a cancellation. Previously this
+ * only ran after returns, which is why marking an order "Paid" or settling
+ * a refund never touched the invoice — it went stale and showed numbers
+ * that didn't match the order anymore.
+ */
+const resyncInvoiceForOrder = async (order) => {
   if (!order.invoiceId) return null; // order predates invoicing
 
   const items = buildInvoiceItemsFromOrder(order);
-  const wasEverFullyPaid = ["paid", "partial_refunded", "refunded"].includes(order.paymentStatus);
-  const grossPaid = wasEverFullyPaid ? Number(order.grandTotal || 0) : 0;
-  const refunded = Number(order.partialRefundAmount || 0);
+
+  // order.paymentStatus is transient — it becomes "refund_pending" etc.
+  // partway through a return/refund, which doesn't tell us whether the
+  // order was ever actually paid. order.paidAt is the stable signal: it's
+  // set the moment payment is received and only cleared if payment is
+  // explicitly reverted to "pending", so it survives every state the order
+  // passes through afterward (returned, refund_pending, refunded, ...).
+  const wasEverPaid = Boolean(order.paidAt);
+  const grossPaid = wasEverPaid ? Number(order.grandTotal || 0) : 0;
+  const refunded = Number(order.partialRefundAmount || 0) + Number(order.refundAmount || 0);
   const netPaid = Math.max(grossPaid - refunded, 0);
 
-  const status = items.length === 0 ? "cancelled" : undefined; // let paidAmount decide paid/partially_paid otherwise
+  // A cancelled order's items don't have returnedQuantity touched (unlike
+  // an actual return), so buildInvoiceItemsFromOrder would still see them
+  // as "active" — check orderStatus explicitly instead of relying on an
+  // empty item list to catch this case.
+  const status = order.orderStatus === "cancelled" || items.length === 0 ? "cancelled" : undefined;
 
   const updated = await updateInvoiceService({
     invoiceId: order.invoiceId,
@@ -104,7 +126,7 @@ const syncInvoiceForReturn = async (order) => {
       items: items.length > 0 ? items : undefined,
       summary: { paidAmount: netPaid },
       ...(status ? { status } : {}),
-      notes: `Adjusted for return on ${new Date().toLocaleDateString("en-IN")}`,
+      notes: `Synced with order ${order.orderId} on ${new Date().toLocaleDateString("en-IN")}`,
     },
   });
 
@@ -121,6 +143,9 @@ const syncInvoiceForReturn = async (order) => {
 
   return updated;
 };
+
+// Old name kept as an alias — createManualReturnService already calls this.
+const syncInvoiceForReturn = resyncInvoiceForOrder;
 const requiredAddrFields = ["fullName", "phone"]; // street/city/etc optional since it's manual
 
 /* =========================================================
@@ -626,6 +651,13 @@ export const updateManualOrderPaymentStatusService = async (data, currentUser) =
 
   await order.save();
 
+  /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ---------- */
+  try {
+    await resyncInvoiceForOrder(order);
+  } catch (err) {
+    console.error("Invoice sync failed on manual order payment status update:", err.message);
+  }
+
   await PermissionAudit.create({
     permissionAuditId: uuidv6(),
     actionBy: employee._id,
@@ -696,6 +728,13 @@ export const cancelManualOrderService = async (orderId, currentUser, reason) => 
   }
 
   await order.save();
+
+  /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ---------- */
+  try {
+    await resyncInvoiceForOrder(order);
+  } catch (err) {
+    console.error("Invoice sync failed on manual order cancel:", err.message);
+  }
 
   try {
     await sendNotification({
@@ -1486,6 +1525,13 @@ export const settleOrderRefundService = async (data, currentUser) => {
     .join(" | ");
 
   await order.save();
+
+  /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ---------- */
+  try {
+    await resyncInvoiceForOrder(order);
+  } catch (err) {
+    console.error("Invoice sync failed on refund settle:", err.message);
+  }
 
   await PermissionAudit.create({
     permissionAuditId: uuidv6(),
