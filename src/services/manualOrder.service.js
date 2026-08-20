@@ -7,6 +7,7 @@ import { sendNotification } from "./notification.service.js";
 import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
 import { orderConfirmationTemplate } from "../config/templates/orderConfirmationTemplate.js";
 import { createInvoiceService, updateInvoiceService } from "./invoice.service.js";
+import Invoice from "../models/manage/invoice.model.js";
 
 /* =========================================================
    INVOICE INTEGRATION HELPERS
@@ -389,6 +390,7 @@ export const getManualOrderService = async (orderId) => {
       $project: {
         _id: 0,
         sourceOrderId: "$orderId",
+        sourceInvoiceId: "$invoiceId",
         amount: "$refundHistory.amount",
         refundedAt: "$refundHistory.refundedAt",
         // What was actually returned to generate this credit — so it never
@@ -402,8 +404,49 @@ export const getManualOrderService = async (orderId) => {
         },
       },
     },
+    // Short human-facing invoice number instead of the long MORD-<uuid>.
+    {
+      $lookup: {
+        from: Invoice.collection.name,
+        localField: "sourceInvoiceId",
+        foreignField: "invoiceId",
+        as: "_sourceInvoice",
+      },
+    },
+    {
+      $addFields: {
+        sourceInvoiceNumber: { $arrayElemAt: ["$_sourceInvoice.invoiceNumber", 0] },
+      },
+    },
+    { $project: { _sourceInvoice: 0, sourceInvoiceId: 0 } },
   ]);
   order.creditsReceived = creditsReceived;
+
+  // Enrich this order's own refundHistory entries with the short invoice
+  // number for whatever they were applied to (credit_note entries only) —
+  // so the "Refund history" section can show that instead of a bare
+  // MORD-<uuid> for the order the credit ended up on.
+  const appliedOrderIds = (order.refundHistory || [])
+    .filter((r) => r.method === "credit_note" && r.appliedToOrderId)
+    .map((r) => r.appliedToOrderId);
+  if (appliedOrderIds.length > 0) {
+    const appliedOrders = await ManualOrder.find({ orderId: { $in: appliedOrderIds } })
+      .select("orderId invoiceId")
+      .lean();
+    const invoiceIds = appliedOrders.map((o) => o.invoiceId).filter(Boolean);
+    const invoices = invoiceIds.length
+      ? await Invoice.find({ invoiceId: { $in: invoiceIds } }).select("invoiceId invoiceNumber").lean()
+      : [];
+    const invoiceNumberByInvoiceId = Object.fromEntries(invoices.map((i) => [i.invoiceId, i.invoiceNumber]));
+    const invoiceNumberByOrderId = Object.fromEntries(
+      appliedOrders.map((o) => [o.orderId, invoiceNumberByInvoiceId[o.invoiceId] || null])
+    );
+    order.refundHistory = (order.refundHistory || []).map((r) =>
+      r.appliedToOrderId && invoiceNumberByOrderId[r.appliedToOrderId]
+        ? { ...r, appliedInvoiceNumber: invoiceNumberByOrderId[r.appliedToOrderId] }
+        : r
+    );
+  }
 
   return order;
 };
@@ -1461,18 +1504,35 @@ export const settleOrderRefundService = async (data, currentUser) => {
   let appliedOrderDate = null;
   let appliedOrderGrandTotal = null;
   let appliedOrderItems = [];
+  let appliedInvoiceNumber = null;
   if (appliedToOrderId) {
     const appliedOrder = await ManualOrder.findOne({ orderId: appliedToOrderId }).lean();
     if (appliedOrder) {
       appliedOrderDate = appliedOrder.createdAt;
       appliedOrderGrandTotal = appliedOrder.grandTotal;
       appliedOrderItems = appliedOrder.items || [];
+      if (appliedOrder.invoiceId) {
+        const appliedInvoice = await Invoice.findOne({ invoiceId: appliedOrder.invoiceId })
+          .select("invoiceNumber")
+          .lean();
+        appliedInvoiceNumber = appliedInvoice?.invoiceNumber || null;
+      }
     }
+  }
+
+  // The order ID (MORD-<uuid>) is long and not something a customer reads
+  // easily — the short invoice number is the human-facing reference, so
+  // pull that in too wherever we have an invoiceId to look up.
+  let sourceInvoiceNumber = null;
+  if (order.invoiceId) {
+    const sourceInvoice = await Invoice.findOne({ invoiceId: order.invoiceId }).select("invoiceNumber").lean();
+    sourceInvoiceNumber = sourceInvoice?.invoiceNumber || null;
   }
 
   return {
     refundId,
     orderId: order.orderId,
+    sourceInvoiceNumber,
     orderDate: order.createdAt,
     customerName: order.customerName,
     customerPhone: order.customerPhone,
@@ -1482,6 +1542,7 @@ export const settleOrderRefundService = async (data, currentUser) => {
     method,
     refundedBy: employee.email,
     appliedToOrderId: appliedToOrderId || null,
+    appliedInvoiceNumber,
     appliedOrderDate,
     appliedOrderGrandTotal,
     appliedOrderItems,
@@ -1539,6 +1600,7 @@ export const getCreditNotesService = async (query) => {
         sourceOrderDate: "$createdAt",
         sourceOrderGrandTotal: "$grandTotal",
         sourceOrderGstPercentage: "$gstPercentage",
+        sourceInvoiceId: "$invoiceId",
         customerName: "$customerName",
         customerPhone: "$customerPhone",
         customerEmail: "$customerEmail",
@@ -1573,9 +1635,35 @@ export const getCreditNotesService = async (query) => {
         appliedOrderDate: "$_appliedOrder.createdAt",
         appliedOrderGrandTotal: "$_appliedOrder.grandTotal",
         appliedOrderItems: { $ifNull: ["$_appliedOrder.items", []] },
+        appliedInvoiceId: "$_appliedOrder.invoiceId",
       },
     },
-    { $project: { _appliedOrder: 0 } },
+    // Order IDs (MORD-<uuid>) are long and not something anyone reads
+    // easily — look up the short, human-facing invoice number for both the
+    // source order and (if used) the order it was applied to.
+    {
+      $lookup: {
+        from: Invoice.collection.name,
+        localField: "sourceInvoiceId",
+        foreignField: "invoiceId",
+        as: "_sourceInvoice",
+      },
+    },
+    {
+      $lookup: {
+        from: Invoice.collection.name,
+        localField: "appliedInvoiceId",
+        foreignField: "invoiceId",
+        as: "_appliedInvoice",
+      },
+    },
+    {
+      $addFields: {
+        sourceInvoiceNumber: { $arrayElemAt: ["$_sourceInvoice.invoiceNumber", 0] },
+        appliedInvoiceNumber: { $arrayElemAt: ["$_appliedInvoice.invoiceNumber", 0] },
+      },
+    },
+    { $project: { _appliedOrder: 0, _sourceInvoice: 0, _appliedInvoice: 0, sourceInvoiceId: 0, appliedInvoiceId: 0 } },
     { $sort: { refundedAt: -1 } },
   ];
 
