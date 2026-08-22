@@ -74,6 +74,7 @@ const allowedOrigins = [
   "https://frontendmaindigi.netlify.app",
   "https://ecommercedigi.netlify.app",
   "https://coruscating-alpaca-89429f.netlify.app",
+  "https://ordermange.netlify.app/login",
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
