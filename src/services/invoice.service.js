@@ -98,6 +98,7 @@ export const createInvoiceService = async (data) => {
     items: (data.items || []).map((item, index) => ({
       articleNo: item.articleNo || String(index + 1),
       description: item.description,
+       hsnCode: item.hsnCode || "90212900",
       qty: item.qty,
       price: item.price,
       discountPercent: item.discountPercent || 0,

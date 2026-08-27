@@ -1,6 +1,7 @@
 import Joi from "joi";
 const invoiceItemValidator = Joi.object({
   articleNo: Joi.string().trim().allow("").optional(),
+   hsnCode: Joi.string().trim().allow("").default("90212900"),
   description: Joi.string().trim().required(),
   qty: Joi.number().min(1).required(),
   price: Joi.number().min(0).required(),

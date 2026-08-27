@@ -33,6 +33,11 @@ const invoiceItemSchema = new Schema(
       trim: true,
       default: "",
     },
+     hsnCode: {                    // ← NEW
+      type: String,
+      trim: true,
+      default: "90212900",
+    },
     description: {
       type: String,
       required: true,
