@@ -1213,16 +1213,11 @@ export const updateCourierDetails = async (req, res) => {
 export const settleReturnCredit = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { amount, notes } = req.body;
+    const { amount, notes, items } = req.body; // ⬅️ items add hua
+    if (!orderId) return sendError(res, { message: "orderId is required", statusCode: 400 });
+    if (!amount || Number(amount) <= 0) return sendError(res, { message: "amount must be a positive number", statusCode: 400 });
 
-    if (!orderId) {
-      return sendError(res, { message: "orderId is required", statusCode: 400, errorCode: "VALIDATION_ERROR" });
-    }
-    if (!amount || Number(amount) <= 0) {
-      return sendError(res, { message: "amount must be a positive number", statusCode: 400, errorCode: "VALIDATION_ERROR" });
-    }
-
-    const data = await settleReturnAsCreditService({ orderId, amount, notes }, req.user.email);
+    const data = await settleReturnAsCreditService({ orderId, amount, notes, items }, req.user.email);
     return sendSuccess(res, data, 200, "Credit note issued successfully");
   } catch (error) {
     return handleError(res, error);
