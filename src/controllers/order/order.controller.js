@@ -1,4 +1,5 @@
 import { cancelOrderService, createOrderService, createReturnRequestService, getAllOrdersAdminService, getAllOrdersService, getAllReturnRequestsService, getOrdersByStatusService, getSingleOrderService, getUserOrdersService, markRefundCompleteAdminService, markRefundCompletedService, salesDashboardService, updateCourierDetailsService, updateOrderStatusService, updatePendingReturnRequestService, updateReturnRequestStatusService, verifyRazorpayService } from "../../services/order.service.js";
+import { settleReturnAsCreditService, getCreditNotesService } from "../../services/creditNote.service.js"; // ⬅️ NAYI LINE
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
 
@@ -1195,6 +1196,49 @@ export const updateCourierDetails = async (req, res) => {
       200,
       "Courier details updated successfully"
     );
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function settleReturnCredit
+ * @description Marks a return's refund as settled via store credit instead
+ * of an instant Razorpay refund — for when staff choose "customer will
+ * take it next time" while processing a return request.
+ *
+ * params: { orderId: string }
+ * body: { amount: number, notes?: string }
+ */
+export const settleReturnCredit = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { amount, notes } = req.body;
+
+    if (!orderId) {
+      return sendError(res, { message: "orderId is required", statusCode: 400, errorCode: "VALIDATION_ERROR" });
+    }
+    if (!amount || Number(amount) <= 0) {
+      return sendError(res, { message: "amount must be a positive number", statusCode: 400, errorCode: "VALIDATION_ERROR" });
+    }
+
+    const data = await settleReturnAsCreditService({ orderId, amount, notes }, req.user.email);
+    return sendSuccess(res, data, 200, "Credit note issued successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function getCreditNotes
+ * @description Every credit note issued across ecommerce orders.
+ *
+ * query: { search?: string }
+ */
+export const getCreditNotes = async (req, res) => {
+  try {
+    const data = await getCreditNotesService(req.query);
+    return sendSuccess(res, data, 200, "Credit notes fetched successfully");
   } catch (error) {
     return handleError(res, error);
   }

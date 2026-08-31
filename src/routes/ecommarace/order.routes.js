@@ -1,5 +1,5 @@
 import express from "express";
-import { createOrder,getUserOrders,getSingleOrder,cancelOrder,updateOrderStatus,getAllOrdersAdmin,getOrdersByStatus,markRefundCompleted,salesDashboard,verifyRazorpay,getAllOrders,markRefundCompleteAdmin,createReturnRequest,getAllReturnRequests,updatePendingReturnRequest,updateReturnRequestStatus,updateCourierDetails} from "../../controllers/order/order.controller.js";
+import { createOrder,getUserOrders,getSingleOrder,cancelOrder,updateOrderStatus,getAllOrdersAdmin,getOrdersByStatus,markRefundCompleted,salesDashboard,verifyRazorpay,getAllOrders,markRefundCompleteAdmin,createReturnRequest,getAllReturnRequests,updatePendingReturnRequest,updateReturnRequestStatus,updateCourierDetails, settleReturnCredit, getCreditNotes} from "../../controllers/order/order.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { attachUser } from "../../middlewares/attechuser.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
@@ -27,5 +27,7 @@ router.put("/return/update/:orderId/:requestId",auth,attachUser,updatePendingRet
 router.get("/return-req/get",getAllReturnRequests);
 router.put("/return/update/status/:orderId/:requestId",auth,checkPermission, updateReturnRequestStatus);
 router.put("/courier/:orderId",auth,checkPermission,updateCourierDetails);
+router.put("/return/credit-settle/:orderId",auth,checkPermission,settleReturnCredit);
+router.get("/credit-notes/get",auth,checkPermission,getCreditNotes);
 export default router;  
 
