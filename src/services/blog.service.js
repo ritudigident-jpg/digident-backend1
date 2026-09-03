@@ -574,34 +574,29 @@ export const increaseBlogViewService = async ({ blogId, req }) => {
     req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress;
   const userAgent = req.headers["user-agent"] || "";
 
-  const lastView = await BlogView.findOne({
+  // ---------- ATOMIC LOCK (prevents race condition) ----------
+  const lockKey = `VIEW_LOCK:${blogId}:${ip}:${userAgent}`;
+  const acquired = await redisClient.set(lockKey, "1", { nx: true, ex: 120 }); // 2 min TTL
+
+  if (!acquired) {
+    // Duplicate call within 2 min — skip counting
+    return { blogId, views: blog.views };
+  }
+
+  await BlogView.create({
     blog: blog._id,
     ipAddress: ip,
     userAgent,
-  }).sort({ viewedAt: -1 });
+    referrer: req.headers.referer || "",
+  });
+  await Blog.updateOne({ blogId }, { $inc: { views: 1 } });
 
-  const now = new Date();
-  const TWO_MIN = 2 * 60 * 1000;
-  const shouldCount = !lastView || now - lastView.viewedAt > TWO_MIN;
-
-  if (shouldCount) {
-    await BlogView.create({
-      blog: blog._id,
-      ipAddress: ip,
-      userAgent,
-      referrer: req.headers.referer || "",
-    });
-    await Blog.updateOne({ blogId }, { $inc: { views: 1 } });
-    blog.views += 1;
-
-    /* ---------- CLEAR CACHE FOR THIS BLOG ---------- */
-    try {
-      await redisClient.del(`BLOG:ID:${blogId}`);
-      await redisClient.del(`BLOG:SLUG:${blog.slug}`);
-    } catch (err) {
-      console.error("Cache clear failed on view increment:", err.message);
-    }
+  try {
+    await redisClient.del(`BLOG:ID:${blogId}`);
+    await redisClient.del(`BLOG:SLUG:${blog.slug}`);
+  } catch (err) {
+    console.error("Cache clear failed on view increment:", err.message);
   }
 
-  return { blogId, views: blog.views };
-};
+  return { blogId, views: blog.views + 1 };
+};  
