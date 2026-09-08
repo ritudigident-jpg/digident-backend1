@@ -1000,7 +1000,7 @@ export const markRefundCompletedService = async (orderId) => {
 };
 
 export const updateOrderStatusService = async (data, currentUser) => {
-  const { orderId, status } = data;
+  const { orderId, status, permission } = data;
 
   /* ---------- AUTH ---------- */
   const employee = await Employee.findOne({ email: currentUser.email });
@@ -1102,7 +1102,7 @@ export const updateOrderStatusService = async (data, currentUser) => {
     actionByEmail: employee.email,
     actionFor: updatedOrder._id,
     actionForEmail: updatedOrder.user?.email,
-    permission: premission  || "update_order_status",
+    permission: permission || "update_order_status",
     action: "update",
     meta: {
       from: currentStatus,
@@ -1114,7 +1114,7 @@ export const updateOrderStatusService = async (data, currentUser) => {
     try {
       await sendNotification({
         sender: employee?._id,
-        permission: premission  || "update_order_status",
+        permission: permission || "update_order_status",
         title: "Order Status Updated",
         message: `Order status updated to ${status} for ${updatedOrder.orderId}`,
         type: "ORDER_STATUS_UPDATED",
