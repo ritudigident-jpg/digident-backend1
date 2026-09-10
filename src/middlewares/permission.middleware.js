@@ -44,23 +44,12 @@ export const checkPermission = async (req, res, next) => {
       }
 
       /* =========================
-         VALIDATE INPUT
+         RESOLVE REQUIRED PERMISSION
       ========================= */
-      let requiredPermission;
-      if (req.method === "GET") {
-        requiredPermission = req.params?.permission;
-      } else {
-        requiredPermission =
-          req.body?.permission ||
-          req.query?.permission;
-      }
-      if (!requiredPermission) {
-        return sendError(res, {
-          message: "Permission is required",
-          statusCode: 500,
-          errorCode: "PERMISSION_CONFIG_MISSING",
-        });
-      }
+      const requiredPermission =
+        req.method === "GET"
+          ? req.params?.permission || req.query?.permission
+          : req.body?.permission || req.query?.permission;
 
       /* =========================
          FETCH EMPLOYEE
@@ -78,9 +67,23 @@ export const checkPermission = async (req, res, next) => {
 
       /* =========================
          SUPER ADMIN BYPASS
+         (runs before the "permission required" guard so an admin is never
+         blocked just because a request forgot to name a permission)
       ========================= */
       if (employee.role === 0) {
+        req.currentUser = employee;
         return next();
+      }
+
+      /* =========================
+         VALIDATE INPUT
+      ========================= */
+      if (!requiredPermission) {
+        return sendError(res, {
+          message: "Permission is required",
+          statusCode: 500,
+          errorCode: "PERMISSION_CONFIG_MISSING",
+        });
       }
 
       /* =========================

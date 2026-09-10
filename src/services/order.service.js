@@ -3368,11 +3368,42 @@ export const markRefundCompleteAdminService = async ({ orderId, amount }, curren
     }
 
     /* ---------- RAZORPAY FETCH ---------- */
-    const paymentDetails = await razorpayInstance.payments.fetch(order.razorpayPaymentId);
+    let paymentDetails;
+    try {
+      paymentDetails = await razorpayInstance.payments.fetch(order.razorpayPaymentId);
+    } catch (rzpErr) {
+      const err = new Error(
+        rzpErr?.error?.description ||
+          `Could not fetch payment ${order.razorpayPaymentId} from Razorpay`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    /* ---------- PAYMENT STATE GUARD ----------
+       Razorpay can only refund a payment that is in the "captured" state.
+       An "authorized" (not captured) payment, or one already "refunded",
+       makes payments.refund() throw an opaque error — catch it early with
+       a message the operator can act on. */
+    if (paymentDetails.status === "refunded") {
+      const err = new Error("This payment is already fully refunded on Razorpay");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (paymentDetails.status !== "captured") {
+      const err = new Error(
+        `Payment is "${paymentDetails.status}", not "captured" — Razorpay cannot refund it yet`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
 
     const totalPaidAmount = paymentDetails.amount / 100;
 
-    const alreadyRefundedAmount = order.partialRefundAmount || 0;
+    // Trust Razorpay's own refunded figure, not just our local counter — a
+    // refund done straight from the Razorpay dashboard would otherwise be missed.
+    const rzpAlreadyRefunded = (paymentDetails.amount_refunded || 0) / 100;
+    const alreadyRefundedAmount = Math.max(order.partialRefundAmount || 0, rzpAlreadyRefunded);
     const remainingRefundableAmount = totalPaidAmount - alreadyRefundedAmount;
 
     if (remainingRefundableAmount <= 0) {
@@ -3403,13 +3434,22 @@ export const markRefundCompleteAdminService = async ({ orderId, amount }, curren
     }
 
     /* ---------- PROCESS REFUND ---------- */
-    const refund = await razorpayInstance.payments.refund(order.razorpayPaymentId, {
-      amount: Math.round(refundAmount * 100),
-      notes: {
-        orderId: order.orderId,
-        refundedBy: employee.email,
-      },
-    });
+    let refund;
+    try {
+      refund = await razorpayInstance.payments.refund(order.razorpayPaymentId, {
+        amount: Math.round(refundAmount * 100),
+        notes: {
+          orderId: order.orderId,
+          refundedBy: employee.email,
+        },
+      });
+    } catch (rzpErr) {
+      const err = new Error(
+        rzpErr?.error?.description || rzpErr?.message || "Razorpay refund failed"
+      );
+      err.statusCode = 400;
+      throw err;
+    }
 
     /* ---------- UPDATE ORDER ---------- */
     const newTotalRefunded = alreadyRefundedAmount + refundAmount;
