@@ -2101,8 +2101,6 @@
 // };
 
 
-
-
 import User from "../models/ecommarace/user.model.js";
 import Cart from "../models/ecommarace/cart.model.js";
 import Product from "../models/manage/product.model.js";
@@ -3090,7 +3088,7 @@ export const markRefundCompletedService = async (orderId, currentUser) => {
   order.refundHistory.push({
     refundId: refund.id,
     amount: order.refundAmount,
-    status: refund.status || "processed",
+    refundStatus: refund.status || "processed",
     refundedAt: new Date(),
   });
 
@@ -3181,15 +3179,21 @@ export const updateOrderStatusService = async (data, currentUser) => {
   }
 
   /* ---------- ATOMIC UPDATE ---------- */
+  const now = new Date();
   const updateData = {
     orderStatus: status,
-    statusUpdatedAt: new Date(),
+    statusUpdatedAt: now,
   };
 
-  if (status === "delivered") {
-    updateData.paymentStatus = "paid";
-    updateData.paidAt = new Date();
-  }
+  // Per-status timestamps only — payment fields are owned exclusively by
+  // verifyRazorpayService and must never be touched here. Delivering an
+  // order does not mean it was "paid just now"; for prepaid orders it was
+  // already paid at checkout, and for COD-style flows payment confirmation
+  // should be its own explicit action, not a side effect of "delivered".
+  if (status === "confirmed") updateData.confirmedAt = now;
+  if (status === "packed") updateData.packedAt = now;
+  if (status === "shipped") updateData.shippedAt = now;
+  if (status === "delivered") updateData.deliveredAt = now;
 
   const updatedOrder = await Order.findOneAndUpdate(
     { orderId, orderStatus: currentStatus },
