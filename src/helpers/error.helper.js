@@ -105,12 +105,27 @@ export const handleError = (res, error) => {
   }
 
   /* =========================
+     RAZORPAY / EXTERNAL SDK ERRORS
+  ========================= */
+
+  if (error?.error?.description || error?.statusCode === 400) {
+    return sendError(res, {
+      message:
+        error?.error?.description || error.message || "Request could not be processed",
+      statusCode: error.statusCode && error.statusCode < 500 ? error.statusCode : 400,
+      errorCode: error?.error?.code || "BAD_REQUEST",
+    });
+  }
+
+  /* =========================
      DEFAULT ERROR
   ========================= */
 
   return sendError(res, {
     message: error.message || "Internal Server Error",
-    statusCode: 500,
+    statusCode: error.statusCode && error.statusCode >= 400 && error.statusCode < 600
+      ? error.statusCode
+      : 500,
     errorCode: "INTERNAL_ERROR",
   });
 };
