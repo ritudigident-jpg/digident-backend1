@@ -5,10 +5,6 @@ import {
   getInvoicesService,
   updateInvoiceService,
   deleteInvoiceService,
-  addInvoiceReturnService,
-  settleInvoiceRefundService,
-  getInvoiceCustomerLedgerService,
-  getInvoiceCreditNotesService,
 } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -753,116 +749,6 @@ export const getInvoices = async (req, res) => {
         ? `Invoices for month ${month}${year ? ` / ${year}` : ""} fetched successfully`
         : "Invoices fetched successfully"
     );
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-
-/* ═════════════════════════════════════════════════════════════════════
-   NEW — RETURN / REFUND / CREDIT-NOTE / LEDGER (invoice-level)
-   ═════════════════════════════════════════════════════════════════════ */
-
-/**
- * @function addInvoiceReturn
- *
- * @route PUT /api/invoice/manage/:invoiceId/return
- *
- * @description
- * Record a return against ANY invoice (manual invoice, ecommerce-order
- * invoice, or manual-order invoice) so it shows up as money owed to the
- * customer on the invoice-level ledger.
- *
- * body: { items: [{ description, qty, price, reason? }], notes? }
- */
-export const addInvoiceReturn = async (req, res) => {
-  try {
-    const { items, notes } = req.body;
-    if (!Array.isArray(items) || items.length === 0) {
-      return sendError(res, {
-        message: "items are required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-    const invoice = await addInvoiceReturnService(
-      { invoiceId: req.params.invoiceId, items, notes },
-      req.user
-    );
-    return sendSuccess(res, invoice, 200, "Return recorded against invoice successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-
-/**
- * @function settleInvoiceRefund
- *
- * @route PUT /api/invoice/manage/:invoiceId/settle-refund
- *
- * @description
- * Settle part or all of a pending refund on an invoice — either an actual
- * cash/UPI/bank/card payout, or a credit_note applied to another invoice.
- *
- * body: {
- *   amount: number,
- *   method?: "cash"|"upi"|"bank_transfer"|"card"|"cheque"|"other"|"credit_note" (default "credit_note"),
- *   reference?: string,
- *   appliedToInvoiceId?: string,
- *   notes?: string
- * }
- */
-export const settleInvoiceRefund = async (req, res) => {
-  try {
-    const { amount, method, reference, appliedToInvoiceId, notes } = req.body;
-    if (!amount || Number(amount) <= 0) {
-      return sendError(res, {
-        message: "amount must be a positive number",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-    const data = await settleInvoiceRefundService(
-      { invoiceId: req.params.invoiceId, amount, method, reference, appliedToInvoiceId, notes },
-      req.user
-    );
-    return sendSuccess(res, data, 200, "Refund settled successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-
-/**
- * @function getInvoiceCustomerLedger
- *
- * @route GET /api/invoice/manage/ledger/:permission
- *
- * @description
- * Per-customer balance ledger computed from the Invoice collection —
- * covers manual invoices, ecommerce-order invoices, and manual-order
- * invoices together.
- */
-export const getInvoiceCustomerLedger = async (req, res) => {
-  try {
-    const data = await getInvoiceCustomerLedgerService(req.query);
-    return sendSuccess(res, data, 200, "Customer ledger fetched successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-
-/**
- * @function getInvoiceCreditNotes
- *
- * @route GET /api/invoice/manage/credit-notes/:permission
- *
- * @description
- * Every "customer will take it next time" credit note issued across all
- * invoices, no matter which flow created the invoice.
- */
-export const getInvoiceCreditNotes = async (req, res) => {
-  try {
-    const data = await getInvoiceCreditNotesService(req.query);
-    return sendSuccess(res, data, 200, "Credit notes fetched successfully");
   } catch (error) {
     return handleError(res, error);
   }

@@ -105,54 +105,6 @@ const invoiceItemSchema = new Schema(
   { _id: false }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  NEW — RETURN / REFUND / CREDIT-NOTE TRACKING (lives directly on Invoice)
-//
-//  Previously this lived only on ManualOrder, which meant the Customer
-//  Ledger and Credit Notes pages only ever saw manual orders — a plain
-//  invoice created by hand, or one created from an ecommerce Order, never
-//  showed up there even though it's exactly the same kind of "customer
-//  returned something / is owed a refund" situation. Moving it here means
-//  the ledger and credit notes can be computed from ONE collection
-//  (Invoice) no matter which of the three ways the invoice was created:
-//    1. createInvoice          — manual invoice, no order behind it
-//    2. createInvoiceFromOrder — linked to an ecommerce Order
-//    3. ManualOrder auto-invoice — linked to a ManualOrder
-// ─────────────────────────────────────────────────────────────────────────────
-
-const invoiceReturnedItemSchema = new Schema(
-  {
-    description: { type: String, required: true, trim: true },
-    qty: { type: Number, required: true, min: 0 },
-    price: { type: Number, required: true, min: 0 }, // per-unit, same convention as items[].price
-    reason: { type: String, trim: true, default: "" },
-    returnedAt: { type: Date, default: Date.now },
-    processedByEmail: { type: String, trim: true, default: "" },
-  },
-  { _id: false }
-);
-
-const invoiceRefundHistorySchema = new Schema(
-  {
-    refundId: { type: String, required: true },
-    amount: { type: Number, required: true, min: 0 },
-    method: {
-      type: String,
-      enum: ["cash", "upi", "bank_transfer", "card", "cheque", "other", "credit_note"],
-      required: true,
-    },
-    reference: { type: String, trim: true, default: null }, // payment reference, for cash-style methods
-    // Only meaningful when method === "credit_note": which OTHER invoice
-    // this credit was actually applied to.
-    appliedToInvoiceId: { type: String, default: null },
-    refundedBy: { type: String, trim: true, default: "" }, // employee email
-    refundedAt: { type: Date, default: Date.now },
-    refundStatus: { type: String, default: "processed" },
-    notes: { type: String, trim: true, default: null },
-  },
-  { _id: false }
-);
-
 const invoiceSchema = new Schema(
   {
     invoiceId: {
@@ -225,7 +177,6 @@ const invoiceSchema = new Schema(
       gstin:         { type: String, trim: true, default: "" },
       contactPerson: { type: String, trim: true, default: "" },
       contactNumber: { type: String, trim: true, default: "" },
-      email:         { type: String, trim: true, default: "" }, // ← NEW, needed for ledger/credit-note contact info
     },
     bankDetails: {
       accountNo:   { type: String, trim: true, default: "" },
@@ -247,17 +198,6 @@ const invoiceSchema = new Schema(
       paidAmount:      { type: Number, default: 0 },
       amountToPay:     { type: Number, default: 0 }, // totalPayAmount - paidAmount
     },
-
-    // ── NEW — return / refund / credit-note tracking ────────────────────────
-    returnedItems: {
-      type: [invoiceReturnedItemSchema],
-      default: [],
-    },
-    refundHistory: {
-      type: [invoiceRefundHistorySchema],
-      default: [],
-    },
-
     notes: {
       type: String,
       trim: true,
@@ -265,19 +205,7 @@ const invoiceSchema = new Schema(
     },
     status: {
       type: String,
-      enum: [
-        "draft",
-        "issued",
-        "paid",
-        "cancelled",
-        "partially_paid",
-        // ← NEW — refund lifecycle states, mirroring ManualOrder.paymentStatus
-        // so the invoice itself can tell the full "does the company owe the
-        // customer / does the customer owe the company" story.
-        "refund_pending",
-        "partial_refunded",
-        "refunded",
-      ],
+      enum: ["draft", "issued", "paid", "cancelled", "partially_paid"],
       default: "draft",
     },
     isDeleted: {
