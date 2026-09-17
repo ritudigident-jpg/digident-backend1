@@ -6,7 +6,17 @@ import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
 import { sendNotification } from "./notification.service.js";
 import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
 import { orderConfirmationTemplate } from "../config/templates/orderConfirmationTemplate.js";
-import { createInvoiceService, updateInvoiceService } from "./invoice.service.js";
+import {
+  createInvoiceService,
+  updateInvoiceService,
+  // NEW — the same invoice-level return/refund functions the plain
+  // /invoice routes use. Calling these here is what makes a manual
+  // order's returns/refunds show up automatically in the invoice-level
+  // Customer Ledger and Credit Notes (which now read from Invoice, not
+  // ManualOrder — see invoice.service.js).
+  addInvoiceReturnService,
+  settleInvoiceRefundService,
+} from "./invoice.service.js";
 import Invoice from "../models/manage/invoice.model.js";
 
 /* =========================================================
@@ -67,6 +77,7 @@ const generateInvoiceForOrder = async (order) => {
       gstin: order.gstNumber || "",
       contactPerson: order.customerName,
       contactNumber: order.customerPhone,
+      email: order.customerEmail || "", // NEW — so the invoice-level ledger has an email to show too
     },
     items,
     summary: {
@@ -114,6 +125,14 @@ const generateInvoiceForOrder = async (order) => {
  * only ran after returns, which is why marking an order "Paid" or settling
  * a refund never touched the invoice — it went stale and showed numbers
  * that didn't match the order anymore.
+ *
+ * NOTE: this only re-syncs the invoice's ITEMS/PAID AMOUNT/STATUS. The
+ * actual return-value and refund-history bookkeeping used by the
+ * invoice-level Customer Ledger / Credit Notes pages is written directly
+ * onto the invoice by addInvoiceReturnService / settleInvoiceRefundService,
+ * called from createManualReturnService and settleOrderRefundService below
+ * — resyncInvoiceForOrder does NOT touch invoice.returnedItems or
+ * invoice.refundHistory, so it never duplicates or overwrites those.
  */
 const resyncInvoiceForOrder = async (order) => {
   if (!order.invoiceId) return null; // order predates invoicing
@@ -151,6 +170,11 @@ const resyncInvoiceForOrder = async (order) => {
   // own "min 1 item" validation on manual edits from the UI later, but the
   // service layer itself doesn't enforce that on updateInvoiceService, so
   // status "cancelled" with an empty items array is left as-is here.
+  //
+  // A cancelled, previously-paid order is exactly the "cancellationRefundOwed"
+  // case the invoice-level ledger already understands on its own (status
+  // "cancelled" + summary.paidAmount not yet refunded) — nothing extra to
+  // write here for that case.
   if (!status && updated) {
     const newStatus = Number(updated.summary?.amountToPay) <= 0 ? "paid" : "partially_paid";
     if (updated.status !== newStatus) {
@@ -746,7 +770,12 @@ export const cancelManualOrderService = async (orderId, currentUser, reason) => 
 
   await order.save();
 
-  /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ---------- */
+  /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ----------
+     resyncInvoiceForOrder sets the invoice's own status to "cancelled",
+     which is exactly what the invoice-level ledger's
+     "cancellationRefundOwed" branch looks for (cancelled + paidAmount not
+     yet refunded) — so a cancelled, previously-paid manual order shows up
+     as money owed to the customer automatically, no extra write needed. */
   try {
     await resyncInvoiceForOrder(order);
   } catch (err) {
@@ -900,6 +929,44 @@ export const createManualReturnService = async (data, currentUser) => {
     console.error("Invoice auto-update failed on manual return:", err.message);
   }
 
+  /* ---------- NEW — MIRROR THIS RETURN ONTO THE LINKED INVOICE ----------
+     This is what makes it show up on the invoice-level Customer Ledger /
+     Credit Notes pages (which now read purely from the Invoice collection
+     so they also cover plain manual invoices and ecommerce-order
+     invoices, not just manual orders). Non-blocking — a failure here
+     never rolls back the order-level return, which has already been
+     recorded above. */
+  if (order.invoiceId) {
+    try {
+      await addInvoiceReturnService(
+        {
+          invoiceId: order.invoiceId,
+          items: validatedItems.map((v) => ({
+            description: v.variantName ? `${v.productName} - ${v.variantName}` : v.productName,
+            qty: v.quantity,
+            price: v.price,
+            reason: v.reason,
+          })),
+          notes: notes || null,
+        },
+        currentUser
+      );
+
+      if (refundNow) {
+        await settleInvoiceRefundService(
+          {
+            invoiceId: order.invoiceId,
+            amount: refundableAmount,
+            method: refundMethod,
+          },
+          currentUser
+        );
+      }
+    } catch (err) {
+      console.error("Invoice return/refund mirror failed on manual return:", err.message);
+    }
+  }
+
   await PermissionAudit.create({
     permissionAuditId: uuidv6(),
     actionBy: employee._id,
@@ -939,7 +1006,8 @@ export const createManualReturnService = async (data, currentUser) => {
 
 /* =========================================================
    MANUAL ORDER ANALYTICS (totals, top products, sales by
-   city/state/country, status breakdowns, trend for graphs)
+   city/state/country, order & payment status breakdowns, and a
+   date-wise trend for a line/bar chart).
 ========================================================= */
 export const getManualOrderAnalyticsService = async (query) => {
   const {
@@ -1189,35 +1257,16 @@ export const getManualOrderAnalyticsService = async (query) => {
 };
 
 /* =========================================================
-   CUSTOMER BALANCE LEDGER
-   Groups every manual order by customer (phone number) and works out,
-   per customer, whether the company still owes them money (unrefunded
-   returns / cancellations) or the customer still owes the company
-   (unpaid orders). Nothing here needs a separate Customer collection —
-   it's all derived from ManualOrder documents already on file.
+   CUSTOMER BALANCE LEDGER (ManualOrder-only — kept for backward
+   compatibility / the "manual orders" specific view).
 
-   Per order:
-     - totalReturnedValue     = value of everything returned on that order
-     - pendingReturnRefund    = totalReturnedValue - amount already paid out
-                                 via refundHistory (tracked as partialRefundAmount)
-     - cancellationRefundOwed = grandTotal, only when the order was
-                                 cancelled after being paid and hasn't been
-                                 refunded yet (paymentStatus stays
-                                 "refund_pending" for cancellations)
-     - unpaidDue              = grandTotal, only when paymentStatus is
-                                 still "pending"
-
-   owedToCustomer = pendingReturnRefund + cancellationRefundOwed  (company owes)
-   owedByCustomer = unpaidDue                                     (customer owes)
-   netBalance     = owedByCustomer - owedToCustomer
-     > 0  -> "customer_owes"   (customer still owes the company)
-     < 0  -> "company_owes"    (company owes the customer a refund)
-     = 0  -> "settled"
-
-   NOTE: this reads paymentStatus/refundHistory/partialRefundAmount as the
-   source of truth. If a cancellation refund is later paid out by some other
-   means, update that order's paymentStatus (e.g. to "refunded") so it stops
-   showing up as owed here.
+   NOTE: the primary, "sir ke hisab se" ledger that covers manual
+   invoices + ecommerce-order invoices + manual-order invoices together
+   is now getInvoiceCustomerLedgerService() in invoice.service.js, exposed
+   at GET /api/invoice/manage/ledger/:permission. Point the frontend's
+   Customer Ledger page at that route instead of this ManualOrder-only one
+   once you're ready to cut over — see the "how to migrate" note in
+   CHANGES.md.
 ========================================================= */
 export const getCustomerBalanceLedgerService = async (query) => {
   const { startDate, endDate, search, balanceStatus, sortBy } = query;
@@ -1550,6 +1599,40 @@ export const settleOrderRefundService = async (data, currentUser) => {
     console.error("Invoice sync failed on refund settle:", err.message);
   }
 
+  /* ---------- NEW — MIRROR THIS SETTLEMENT ONTO THE LINKED INVOICE ----------
+     Same reasoning as in createManualReturnService above: the
+     invoice-level Credit Notes / Customer Ledger pages read straight from
+     Invoice.refundHistory, so this settlement needs to land there too, not
+     just on the ManualOrder document. If the credit was applied toward
+     ANOTHER manual order (appliedToOrderId), resolve that order's own
+     invoiceId so the invoice-level credit note links to the right
+     invoice (not a bare order ID). */
+  if (order.invoiceId) {
+    try {
+      let appliedToInvoiceId = null;
+      if (appliedToOrderId) {
+        const appliedOrder = await ManualOrder.findOne({ orderId: appliedToOrderId })
+          .select("invoiceId")
+          .lean();
+        appliedToInvoiceId = appliedOrder?.invoiceId || null;
+      }
+
+      await settleInvoiceRefundService(
+        {
+          invoiceId: order.invoiceId,
+          amount: creditAmount,
+          method,
+          reference,
+          appliedToInvoiceId,
+          notes,
+        },
+        currentUser
+      );
+    } catch (err) {
+      console.error("Invoice refund-settle mirror failed on refund settle:", err.message);
+    }
+  }
+
   await PermissionAudit.create({
     permissionAuditId: uuidv6(),
     actionBy: employee._id,
@@ -1622,11 +1705,11 @@ export const settleOrderRefundService = async (data, currentUser) => {
 export const settleRefundWithCreditService = settleOrderRefundService;
 
 /* =========================================================
-   CREDIT NOTES LIST
-   Every refundHistory entry across every order where method === "credit_note"
-   — i.e. every time staff recorded "customer will take it next time"
-   instead of a cash payout. Used to power a dedicated Credit Notes page and
-   to let staff re-download a specific credit note's PDF later.
+   CREDIT NOTES LIST (ManualOrder-only — kept for backward compatibility).
+
+   NOTE: the primary, invoice-based credit notes list that covers all 3
+   invoice-creation flows is getInvoiceCreditNotesService() in
+   invoice.service.js, exposed at GET /api/invoice/manage/credit-notes/:permission.
 ========================================================= */
 export const getCreditNotesService = async (query) => {
   const { search, startDate, endDate } = query;
