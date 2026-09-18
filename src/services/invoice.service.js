@@ -529,6 +529,8 @@ const syncRefundStateToSourceOrder = async (invoice) => {
    pending refund (return, cancellation, ...). This is the ONLY function
    that decrements it and writes refundHistory.
    ========================================================================= */
+// services/invoice.service.js — sirf settleInvoiceRefundService ka return block change karo
+
 export const settleInvoiceRefundService = async (data, currentUser) => {
   const { invoiceId, amount, method = "credit_note", reference, appliedToOrderId, notes } = data;
 
@@ -605,23 +607,30 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
     console.error("Order sync failed after invoice refund settle:", err.message);
   }
 
+  // Average GST% across this invoice's items — used only for the credit
+  // note PDF's tax breakdown when the frontend has no better source.
+  const avgGstPercent =
+    invoice.items.length > 0
+      ? invoice.items.reduce((s, i) => s + Number(i.gstPercent || 0), 0) / invoice.items.length
+      : 0;
+
   // If this credit was applied straight onto a new manual order, pull that
-  // order's invoice number so the response/printable credit note has real
-  // context instead of a bare order ID.
+  // order's/invoice's details so the response (and any PDF built from it)
+  // has real context instead of a bare order ID.
   let appliedOrderDate = null;
   let appliedOrderGrandTotal = null;
+  let appliedOrderItems = [];
   let appliedInvoiceNumber = null;
   if (appliedToOrderId) {
-    const appliedOrder = await ManualOrder.findOne({ orderId: appliedToOrderId }).lean();
-    if (appliedOrder) {
-      appliedOrderDate = appliedOrder.createdAt;
-      appliedOrderGrandTotal = appliedOrder.grandTotal;
-      if (appliedOrder.invoiceId) {
-        const appliedInvoice = await Invoice.findOne({ invoiceId: appliedOrder.invoiceId })
-          .select("invoiceNumber")
-          .lean();
-        appliedInvoiceNumber = appliedInvoice?.invoiceNumber || null;
-      }
+    const appliedInvoice = await Invoice.findOne({
+      sourceOrderId: appliedToOrderId,
+      isDeleted: false,
+    }).lean();
+    if (appliedInvoice) {
+      appliedOrderDate = appliedInvoice.orderDate;
+      appliedOrderGrandTotal = appliedInvoice.summary?.totalPayAmount || 0;
+      appliedOrderItems = appliedInvoice.items || [];
+      appliedInvoiceNumber = appliedInvoice.invoiceNumber;
     }
   }
 
@@ -629,21 +638,35 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
     refundId,
     invoiceId: invoice.invoiceId,
     invoiceNumber: invoice.invoiceNumber,
+    sourceInvoiceNumber: invoice.invoiceNumber,
     sourceOrderId: invoice.sourceOrderId,
     sourceOrderType: invoice.sourceOrderType,
+    orderDate: invoice.orderDate,
+    customerName: invoice.billTo?.contactPerson,
     customerCompany: invoice.billTo?.companyName,
-    customerContact: invoice.billTo?.contactPerson,
     customerPhone: invoice.billTo?.contactNumber,
+    customerEmail: null, // billTo has no email field on the invoice schema
     refundStatus: invoice.refundStatus,
+    paymentStatus: invoice.refundStatus, // alias, some UI reads this name
+    amount: settleAmount,
     amountSettled: settleAmount,
     method,
     refundedBy: employee.email,
+    refundedAt: invoice.refundedAt,
     appliedToOrderId: appliedToOrderId || null,
     appliedInvoiceNumber,
     appliedOrderDate,
     appliedOrderGrandTotal,
+    appliedOrderItems,
     remainingOwed: invoice.refundableAmount,
-    items: invoice.items,
+    sourceOrderGstPercentage: Math.round(avgGstPercent * 100) / 100,
+    // Best-effort: the invoice's current line items. On an invoice whose
+    // source order still exists, these are the items still active after
+    // the return (not literally "what was returned") — good enough for a
+    // credit note issued straight from the Invoice pages. The manual-order
+    // "Settle" flow (SettleRefundModal) builds a proper returnedItems list
+    // itself from the order's own returnRequests, which is more accurate.
+    returnedItems: invoice.items,
   };
 };
 
