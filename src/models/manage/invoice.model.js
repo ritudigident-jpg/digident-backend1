@@ -276,6 +276,7 @@
 // const Invoice = model("Invoice", invoiceSchema);
 // export default Invoice;
 
+
 import mongoose from "mongoose";
 import { v6 as uuidv6 } from "uuid";
 const { Schema, model } = mongoose;
@@ -311,7 +312,7 @@ const invoiceItemSchema = new Schema(
       trim: true,
       default: "",
     },
-     hsnCode: {                    // ← NEW
+    hsnCode: {
       type: String,
       trim: true,
       default: "90212900",
@@ -383,49 +384,30 @@ const invoiceItemSchema = new Schema(
   { _id: false }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  NEW — RETURN / REFUND / CREDIT-NOTE TRACKING (lives directly on Invoice)
-//
-//  Previously this lived only on ManualOrder, which meant the Customer
-//  Ledger and Credit Notes pages only ever saw manual orders — a plain
-//  invoice created by hand, or one created from an ecommerce Order, never
-//  showed up there even though it's exactly the same kind of "customer
-//  returned something / is owed a refund" situation. Moving it here means
-//  the ledger and credit notes can be computed from ONE collection
-//  (Invoice) no matter which of the three ways the invoice was created:
-//    1. createInvoice          — manual invoice, no order behind it
-//    2. createInvoiceFromOrder — linked to an ecommerce Order
-//    3. ManualOrder auto-invoice — linked to a ManualOrder
-// ─────────────────────────────────────────────────────────────────────────────
-
-const invoiceReturnedItemSchema = new Schema(
+/* =========================================================================
+   REFUND HISTORY ENTRY
+   One entry per settlement made against this invoice's pending refund —
+   either a real payout (cash/upi/bank_transfer/card/other) or store credit
+   ("customer will take it next time", method: "credit_note"). Written only
+   by settleInvoiceRefundService in invoice.service.js — nothing else should
+   push into this array directly.
+   ========================================================================= */
+const refundHistoryEntrySchema = new Schema(
   {
-    description: { type: String, required: true, trim: true },
-    qty: { type: Number, required: true, min: 0 },
-    price: { type: Number, required: true, min: 0 }, // per-unit, same convention as items[].price
-    reason: { type: String, trim: true, default: "" },
-    returnedAt: { type: Date, default: Date.now },
-    processedByEmail: { type: String, trim: true, default: "" },
-  },
-  { _id: false }
-);
-
-const invoiceRefundHistorySchema = new Schema(
-  {
-    refundId: { type: String, required: true },
-    amount: { type: Number, required: true, min: 0 },
+    refundId: { type: String, trim: true, required: true },
+    amount: { type: Number, min: 0, required: true },
     method: {
       type: String,
-      enum: ["cash", "upi", "bank_transfer", "card", "cheque", "other", "credit_note"],
-      required: true,
+      enum: ["cash", "upi", "bank_transfer", "card", "other", "credit_note"],
+      default: "credit_note",
     },
     reference: { type: String, trim: true, default: null }, // payment reference, for cash-style methods
-    // Only meaningful when method === "credit_note": which OTHER invoice
-    // this credit was actually applied to.
-    appliedToInvoiceId: { type: String, default: null },
     refundedBy: { type: String, trim: true, default: "" }, // employee email
     refundedAt: { type: Date, default: Date.now },
-    refundStatus: { type: String, default: "processed" },
+    refundStatus: { type: String, trim: true, default: "processed" },
+    // Only meaningful when method === "credit_note": which new
+    // order/invoice this credit was actually spent on.
+    appliedToOrderId: { type: String, default: null },
     notes: { type: String, trim: true, default: null },
   },
   { _id: false }
@@ -492,24 +474,23 @@ const invoiceSchema = new Schema(
     },
     seller: {
       companyName: { type: String, trim: true, default: "" },
-      address:     { type: String, trim: true, default: "" },
-      gstin:       { type: String, trim: true, default: "" },
-      email:       { type: String, trim: true, default: "" },
+      address: { type: String, trim: true, default: "" },
+      gstin: { type: String, trim: true, default: "" },
+      email: { type: String, trim: true, default: "" },
       contactNumber: { type: String, trim: true, default: "" },
     },
     billTo: {
-      companyName:   { type: String, required: true, trim: true },
-      address:       { type: String, trim: true, default: "" },
-      gstin:         { type: String, trim: true, default: "" },
+      companyName: { type: String, required: true, trim: true },
+      address: { type: String, trim: true, default: "" },
+      gstin: { type: String, trim: true, default: "" },
       contactPerson: { type: String, trim: true, default: "" },
       contactNumber: { type: String, trim: true, default: "" },
-      email:         { type: String, trim: true, default: "" }, // ← NEW, needed for ledger/credit-note contact info
     },
     bankDetails: {
-      accountNo:   { type: String, trim: true, default: "" },
+      accountNo: { type: String, trim: true, default: "" },
       accountType: { type: String, trim: true, default: "" },
-      ifscCode:    { type: String, trim: true, default: "" },
-      holderName:  { type: String, trim: true, default: "" },
+      ifscCode: { type: String, trim: true, default: "" },
+      holderName: { type: String, trim: true, default: "" },
     },
     items: {
       type: [invoiceItemSchema],
@@ -517,24 +498,14 @@ const invoiceSchema = new Schema(
     },
     summary: {
       totalGrossValue: { type: Number, default: 0 }, // sum of all grossAmounts
-      totalDiscount:   { type: Number, default: 0 }, // sum of all discountValues
-      totalNet:        { type: Number, default: 0 }, // sum of all totalNet (ex-GST after discount)
-      totalTax:        { type: Number, default: 0 }, // sum of all gstAmounts
-      freightCost:     { type: Number, default: 0 },
-      totalPayAmount:  { type: Number, default: 0 }, // totalNet + totalTax + freightCost
-      paidAmount:      { type: Number, default: 0 },
-      amountToPay:     { type: Number, default: 0 }, // totalPayAmount - paidAmount
+      totalDiscount: { type: Number, default: 0 }, // sum of all discountValues
+      totalNet: { type: Number, default: 0 }, // sum of all totalNet (ex-GST after discount)
+      totalTax: { type: Number, default: 0 }, // sum of all gstAmounts
+      freightCost: { type: Number, default: 0 },
+      totalPayAmount: { type: Number, default: 0 }, // totalNet + totalTax + freightCost
+      paidAmount: { type: Number, default: 0 },
+      amountToPay: { type: Number, default: 0 }, // totalPayAmount - paidAmount
     },
-    // ── NEW — return / refund / credit-note tracking ────────────────────────
-    returnedItems: {
-      type: [invoiceReturnedItemSchema],
-      default: [],
-    },
-    refundHistory: {
-      type: [invoiceRefundHistorySchema],
-      default: [],
-    },
-
     notes: {
       type: String,
       trim: true,
@@ -542,22 +513,64 @@ const invoiceSchema = new Schema(
     },
     status: {
       type: String,
-      enum: [
-        "draft",
-        "issued",
-        "paid",
-        "cancelled",
-        "partially_paid",
-        // ← NEW — refund lifecycle states, mirroring ManualOrder.paymentStatus
-        "refund_pending",
-        "partial_refunded",
-        "refunded",
-      ],
+      enum: ["draft", "issued", "paid", "cancelled", "partially_paid"],
       default: "draft",
     },
     isDeleted: {
       type: Boolean,
       default: false,
+    },
+
+    /* ================= LINK BACK TO SOURCE ORDER =================
+       Set once, at creation time (createInvoiceService), so a refund
+       settled on this invoice can be mirrored back onto the order it
+       came from — purely for display/legacy reads on the order side.
+       This invoice is the single source of truth for money; the order
+       never derives amounts on its own anymore. */
+    sourceOrderId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    sourceOrderType: {
+      type: String,
+      enum: ["manual", "ecommerce", null],
+      default: null,
+    },
+
+    /* ================= CREDIT NOTE / REFUND SETTLEMENT =================
+       This is the ONLY place a pending refund (from a return or a
+       cancellation, on ANY order type) gets settled — either as a real
+       payout (cash/upi/bank_transfer/card/other) or as store credit
+       (method: "credit_note"). The order that caused this just reports
+       how much is currently owed (refundableAmount) via updateInvoiceService
+       whenever its own state changes (return, cancellation, ...); only
+       settleInvoiceRefundService in invoice.service.js is allowed to pay
+       that amount down and push into refundHistory. */
+    refundStatus: {
+      type: String,
+      enum: ["none", "refund_pending", "partial_refunded", "refunded"],
+      default: "none",
+    },
+    refundableAmount: {
+      // remaining amount still owed back to the customer right now
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    partialRefundAmount: {
+      // cumulative amount already settled (cash payouts + credit notes)
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    refundedAt: {
+      type: Date,
+      default: null,
+    },
+    refundHistory: {
+      type: [refundHistoryEntrySchema],
+      default: [],
     },
   },
   { timestamps: true }
@@ -568,52 +581,52 @@ const invoiceSchema = new Schema(
 // ─────────────────────────────────────────────────────────────────────────────
 
 invoiceSchema.pre("save", function () {
-  let sumGrossAmount  = 0; // total MRP before discount
-  let sumDiscount     = 0; // total discount given
-  let sumNet          = 0; // total base price after discount (ex-GST)
-  let sumTax          = 0; // total GST after discount
+  let sumGrossAmount = 0; // total MRP before discount
+  let sumDiscount = 0; // total discount given
+  let sumNet = 0; // total base price after discount (ex-GST)
+  let sumTax = 0; // total GST after discount
 
   for (const item of this.items) {
-    const qty         = Math.max(0, Number(item.qty)         || 0);
-    const price       = Math.max(0, Number(item.price)       || 0);
-    const gstPercent  = Math.max(0, Number(item.gstPercent)  || 5);
-    const discPct     = Math.min(100, Math.max(0, Number(item.discountPercent) || 0));
+    const qty = Math.max(0, Number(item.qty) || 0);
+    const price = Math.max(0, Number(item.price) || 0);
+    const gstPercent = Math.max(0, Number(item.gstPercent) || 5);
+    const discPct = Math.min(100, Math.max(0, Number(item.discountPercent) || 0));
 
     // Step 1 — Gross amount (qty × GST-inclusive price)
     const grossAmount = qty * price;
 
     // Step 2 — Discount on gross amount
-    const discountValue   = round2(grossAmount * discPct / 100);
+    const discountValue = round2((grossAmount * discPct) / 100);
     const discountedTotal = round2(grossAmount - discountValue);
 
     // Step 3 — Extract base & GST from discounted total
-    const divisor   = 1 + gstPercent / 100;
-    const totalNet  = round2(discountedTotal / divisor);
+    const divisor = 1 + gstPercent / 100;
+    const totalNet = round2(discountedTotal / divisor);
     const gstAmount = round2(discountedTotal - totalNet);
 
     // Write back to item
-    item.grossAmount    = round2(grossAmount);
-    item.discountValue  = discountValue;
-    item.totalNet       = totalNet;
-    item.gstAmount      = gstAmount;
-    item.totalAmount    = discountedTotal; // final payable for this line
+    item.grossAmount = round2(grossAmount);
+    item.discountValue = discountValue;
+    item.totalNet = totalNet;
+    item.gstAmount = gstAmount;
+    item.totalAmount = discountedTotal; // final payable for this line
 
     // Accumulate summary
     sumGrossAmount += grossAmount;
-    sumDiscount    += discountValue;
-    sumNet         += totalNet;
-    sumTax         += gstAmount;
+    sumDiscount += discountValue;
+    sumNet += totalNet;
+    sumTax += gstAmount;
   }
 
   const freightCost = Math.max(0, Number(this.summary.freightCost) || 0);
-  const paidAmount  = Math.max(0, Number(this.summary.paidAmount)  || 0);
+  const paidAmount = Math.max(0, Number(this.summary.paidAmount) || 0);
 
   this.summary.totalGrossValue = round2(sumGrossAmount);
-  this.summary.totalDiscount   = round2(sumDiscount);
-  this.summary.totalNet        = round2(sumNet);
-  this.summary.totalTax        = round2(sumTax);
-  this.summary.totalPayAmount  = round2(sumNet + sumTax + freightCost);
-  this.summary.amountToPay     = round2(this.summary.totalPayAmount - paidAmount);
+  this.summary.totalDiscount = round2(sumDiscount);
+  this.summary.totalNet = round2(sumNet);
+  this.summary.totalTax = round2(sumTax);
+  this.summary.totalPayAmount = round2(sumNet + sumTax + freightCost);
+  this.summary.amountToPay = round2(this.summary.totalPayAmount - paidAmount);
 });
 
 function round2(n) {

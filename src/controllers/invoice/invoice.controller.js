@@ -5,6 +5,7 @@
 //   getInvoicesService,
 //   updateInvoiceService,
 //   deleteInvoiceService,
+  
 // } from "../../services/invoice.service.js";
 // import { sendError, handleError } from "../../helpers/error.helper.js";
 // import { sendSuccess } from "../../helpers/response.helper.js";
@@ -754,6 +755,7 @@
 //   }
 // };
 
+
 import { createInvoiceValidator } from "./invoice.validator.js";
 import {
   createInvoiceService,
@@ -761,9 +763,7 @@ import {
   getInvoicesService,
   updateInvoiceService,
   deleteInvoiceService,
-  addInvoiceReturnService,
   settleInvoiceRefundService,
-  getInvoiceCustomerLedgerService,
   getInvoiceCreditNotesService,
 } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
@@ -875,9 +875,9 @@ export const createInvoice = async (req, res) => {
  * 404 - ORDER_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const createInvoiceFromOrder = async(req,res)=>{
-  try{
-     const { value, error } = createInvoiceValidator.validate(req.body, {
+export const createInvoiceFromOrder = async (req, res) => {
+  try {
+    const { value, error } = createInvoiceValidator.validate(req.body, {
       abortEarly: false,
       stripUnknown: true,
     });
@@ -890,7 +890,7 @@ export const createInvoiceFromOrder = async(req,res)=>{
         details: error.details.map((e) => e.message),
       });
     }
-    const user = await User.findOne({email: req.user.email});
+    const user = await User.findOne({ email: req.user.email });
     if (!user) {
       return sendError(res, {
         message: "User not found",
@@ -898,27 +898,34 @@ export const createInvoiceFromOrder = async(req,res)=>{
         errorCode: "USER_NOT_FOUND",
       });
     }
-    const invoice = await createInvoiceService(value);
-    // call here a order and stroge a iId value in order same as  OrderId in Invoice for tracking the order and invoice relation
-    console.log("value OrderId -------",value.orderId);
-    const order = await Order.findOne({orderId: value.orderId});
-    if(!order){
+
+    const order = await Order.findOne({ orderId: value.orderId });
+    if (!order) {
       return sendError(res, {
         message: "Order not found",
         statusCode: 404,
         errorCode: "ORDER_NOT_FOUND",
       });
     }
+
+    // NOTE: sourceOrderId/sourceOrderType link this invoice back to the
+    // ecommerce order, so a refund settled later on the invoice
+    // (settleInvoiceCredit) can be mirrored back onto this order.
+    const invoice = await createInvoiceService({
+      ...value,
+      sourceOrderId: order.orderId,
+      sourceOrderType: "ecommerce",
+    });
+
     order.iId = invoice.orderNumber;
-    order.invoiceId = invoice.invoiceId;  
+    order.invoiceId = invoice.invoiceId;
     await order.save();
-    console.log("order iId:", order.iId);
-      console.log("order found for invoice creation", order);
+
     return sendSuccess(res, invoice, 201, "Invoice created successfully");
-  }catch(error){
+  } catch (error) {
     return handleError(res, error);
   }
-}
+};
 
 /**
  * @function updateInvoice
@@ -1053,13 +1060,12 @@ export const updateInvoiceByUser = async (req, res) => {
       invoiceId: req.params.invoiceId,
       data: value,
     });
-      // Additional logic for updating invoice by user
+    // Additional logic for updating invoice by user
     return sendSuccess(res, invoice, 200, "Invoice updated successfully");
+  } catch (error) {
+    return handleError(res, error);
   }
-    catch (error) {
-      return handleError(res, error);
-    }
-}
+};
 
 /**
  * @function deleteInvoice
@@ -1139,7 +1145,7 @@ export const deleteInvoice = async (req, res) => {
  * 404 - INVOICE_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const deleteInvoiceByUser = async (req, res) => {  
+export const deleteInvoiceByUser = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.user.email });
     if (!user) {
@@ -1149,9 +1155,9 @@ export const deleteInvoiceByUser = async (req, res) => {
         errorCode: "USER_NOT_FOUND",
       });
     }
-    const invoice = await deleteInvoiceService({
+    await deleteInvoiceService({
       invoiceId: req.params.invoiceId,
-    }); 
+    });
     return sendSuccess(res, null, 200, "Invoice deleted successfully");
     // Additional logic for deleting invoice by user
   } catch (error) {
@@ -1186,22 +1192,22 @@ export const deleteInvoiceByUser = async (req, res) => {
  */
 export const getInvoiceByIdForUser = async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.user.email }); 
+    const user = await User.findOne({ email: req.user.email });
     if (!user) {
       return sendError(res, {
-        message: "User not found",  
-        statusCode: 404,  
+        message: "User not found",
+        statusCode: 404,
         errorCode: "USER_NOT_FOUND",
       });
     }
     const invoice = await getInvoiceByIdService({
       invoiceId: req.params.invoiceId,
-    }); 
+    });
     return sendSuccess(res, invoice, 200, "Invoice fetched successfully");
-  } catch (error) { 
+  } catch (error) {
     return handleError(res, error);
-    }
-  };
+  }
+};
 
 /**
  * @function getInvoiceById
@@ -1261,10 +1267,8 @@ export const getInvoiceById = async (req, res) => {
  * @errors
  * 500 - FETCH_CUSTOMERS_ERROR
  */
-
 export const getInvoiceCustomers = async (req, res) => {
   try {
-
     const customers = await Invoice.aggregate([
       {
         $match: {
@@ -1319,21 +1323,13 @@ export const getInvoiceCustomers = async (req, res) => {
       },
     ]);
 
-    return sendSuccess(
-      res,
-      customers,
-      200,
-      "Customers fetched successfully"
-    );
-
+    return sendSuccess(res, customers, 200, "Customers fetched successfully");
   } catch (error) {
-
     return sendError(res, {
       message: error.message || "Failed to fetch customers",
       statusCode: 500,
       errorCode: "FETCH_CUSTOMERS_ERROR",
     });
-
   }
 };
 
@@ -1363,8 +1359,6 @@ export const getInvoiceCustomers = async (req, res) => {
  */
 export const deleteAllInvoices = async (req, res) => {
   try {
-
-
     // Permanently delete all invoices
     const deleted = await Invoice.deleteMany({});
 
@@ -1376,7 +1370,6 @@ export const deleteAllInvoices = async (req, res) => {
       200,
       "All invoices deleted permanently"
     );
-
   } catch (error) {
     return handleError(res, error);
   }
@@ -1436,12 +1429,10 @@ export const getInvoicesByCustomerId = async (req, res) => {
       200,
       "Customer invoices fetched successfully"
     );
-
   } catch (error) {
     return handleError(res, error);
   }
 };
-
 
 /**
  * @function getInvoices
@@ -1514,62 +1505,61 @@ export const getInvoices = async (req, res) => {
   }
 };
 
-/* ═════════════════════════════════════════════════════════════════════
-   NEW — RETURN / REFUND / CREDIT-NOTE / LEDGER (invoice-level)
-   ═════════════════════════════════════════════════════════════════════ */
-
 /**
- * @function addInvoiceReturn
+ * @function settleInvoiceCredit
  *
- * @route PUT /api/invoice/manage/:invoiceId/return
+ * @route PUT /api/invoice/manage/credit-settle/:invoiceId
  *
  * @description
- * Record a return against ANY invoice (manual invoice, ecommerce-order
- * invoice, or manual-order invoice) so it shows up as money owed to the
- * customer on the invoice-level ledger.
+ * Settles part or all of a pending refund on an invoice — either an
+ * actual payout (cash/upi/bank_transfer/card/other, "I've physically
+ * refunded this"), or store credit applied to a new order ("customer
+ * will take it next time", method: "credit_note"). This is the ONLY
+ * way a "refund_pending" / "partial_refunded" invoice can move to
+ * "refunded" — regardless of whether the invoice originally came from
+ * a manual order, an ecommerce order, or was created directly.
  *
- * body: { items: [{ description, qty, price, reason? }], notes? }
+ * @process
+ * 1. Validate orderId param + amount in body.
+ * 2. Delegate settlement to settleInvoiceRefundService (validates
+ *    employee, refund status, method, amount vs outstanding balance).
+ * 3. Create PermissionAudit entry.
+ * 4. Return settlement details.
+ *
+ * @params
+ * params: { invoiceId: string }
+ * body: {
+ *   amount: number,
+ *   method?: "cash"|"upi"|"bank_transfer"|"card"|"other"|"credit_note" (default "credit_note"),
+ *   reference?: string,
+ *   appliedToOrderId?: string,
+ *   notes?: string
+ * }
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Refund settled successfully",
+ *   data: { refundId, invoiceId, invoiceNumber, refundStatus, amountSettled, ... }
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - INVOICE_NOT_FOUND / EMPLOYEE_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
  */
-export const addInvoiceReturn = async (req, res) => {
+export const settleInvoiceCredit = async (req, res) => {
   try {
-    const { items, notes } = req.body;
-    if (!Array.isArray(items) || items.length === 0) {
+    const { invoiceId } = req.params;
+    const { amount, method, reference, appliedToOrderId, notes } = req.body;
+
+    if (!invoiceId) {
       return sendError(res, {
-        message: "items are required",
+        message: "invoiceId is required",
         statusCode: 400,
         errorCode: "VALIDATION_ERROR",
       });
     }
-    const invoice = await addInvoiceReturnService(
-      { invoiceId: req.params.invoiceId, items, notes },
-      req.user
-    );
-    return sendSuccess(res, invoice, 200, "Return recorded against invoice successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-
-/**
- * @function settleInvoiceRefund
- *
- * @route PUT /api/invoice/manage/:invoiceId/settle-refund
- *
- * @description
- * Settle part or all of a pending refund on an invoice — either an actual
- * cash/UPI/bank/card payout, or a credit_note applied to another invoice.
- *
- * body: {
- *   amount: number,
- *   method?: "cash"|"upi"|"bank_transfer"|"card"|"cheque"|"other"|"credit_note" (default "credit_note"),
- *   reference?: string,
- *   appliedToInvoiceId?: string,
- *   notes?: string
- * }
- */
-export const settleInvoiceRefund = async (req, res) => {
-  try {
-    const { amount, method, reference, appliedToInvoiceId, notes } = req.body;
     if (!amount || Number(amount) <= 0) {
       return sendError(res, {
         message: "amount must be a positive number",
@@ -1577,30 +1567,32 @@ export const settleInvoiceRefund = async (req, res) => {
         errorCode: "VALIDATION_ERROR",
       });
     }
+
     const data = await settleInvoiceRefundService(
-      { invoiceId: req.params.invoiceId, amount, method, reference, appliedToInvoiceId, notes },
+      { invoiceId, amount, method, reference, appliedToOrderId, notes },
       req.user
     );
-    return sendSuccess(res, data, 200, "Refund settled successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
 
-/**
- * @function getInvoiceCustomerLedger
- *
- * @route GET /api/invoice/manage/ledger/:permission
- *
- * @description
- * Per-customer balance ledger computed from the Invoice collection —
- * covers manual invoices, ecommerce-order invoices, and manual-order
- * invoices together.
- */
-export const getInvoiceCustomerLedger = async (req, res) => {
-  try {
-    const data = await getInvoiceCustomerLedgerService(req.query);
-    return sendSuccess(res, data, 200, "Customer ledger fetched successfully");
+    /* ---------- AUDIT LOG ---------- */
+    try {
+      const employee = await Employee.findOne({ email: req.user.email });
+      if (employee) {
+        await PermissionAudit.create({
+          permissionAuditId: uuidv6(),
+          actionBy: employee._id,
+          actionByEmail: employee.email,
+          actionFor: null,
+          actionForEmail: null,
+          action: data.invoiceNumber,
+          permission: req.body.permission || "invoice.manage.credit_settle",
+          actionType: "Update",
+        });
+      }
+    } catch (auditErr) {
+      console.error("Audit log failed on invoice credit settle:", auditErr.message);
+    }
+
+    return sendSuccess(res, data, 200, "Refund settled successfully");
   } catch (error) {
     return handleError(res, error);
   }
@@ -1612,8 +1604,28 @@ export const getInvoiceCustomerLedger = async (req, res) => {
  * @route GET /api/invoice/manage/credit-notes/:permission
  *
  * @description
- * Every "customer will take it next time" credit note issued across all
- * invoices, no matter which flow created the invoice.
+ * Every "customer will take it next time" credit note issued across
+ * all invoices — regardless of source (manual order, ecommerce order,
+ * or a directly created invoice). Used to power a dedicated Credit
+ * Notes page.
+ *
+ * @process
+ * 1. Read search/date filters from query.
+ * 2. Delegate to getInvoiceCreditNotesService.
+ * 3. Return credit notes list + summary.
+ *
+ * @params
+ * query: { search?: string, startDate?: ISO date, endDate?: ISO date }
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Credit notes fetched successfully",
+ *   data: { creditNotes: [...], summary: {...} }
+ * }
+ *
+ * @errors
+ * 500 - INTERNAL_SERVER_ERROR
  */
 export const getInvoiceCreditNotes = async (req, res) => {
   try {

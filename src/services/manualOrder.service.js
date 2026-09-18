@@ -1807,7 +1807,6 @@
 //   };
 // };
 
-
 import mongoose from "mongoose";
 import { v6 as uuidv6 } from "uuid";
 import Employee from "../models/manage/employee.model.js";
@@ -1816,17 +1815,7 @@ import { PermissionAudit } from "../models/manage/permissionaudit.model.js";
 import { sendNotification } from "./notification.service.js";
 import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
 import { orderConfirmationTemplate } from "../config/templates/orderConfirmationTemplate.js";
-import {
-  createInvoiceService,
-  updateInvoiceService,
-  // NEW — the same invoice-level return/refund functions the plain
-  // /invoice routes use. Calling these here is what makes a manual
-  // order's returns/refunds show up automatically in the invoice-level
-  // Customer Ledger and Credit Notes (which now read from Invoice, not
-  // ManualOrder — see invoice.service.js).
-  addInvoiceReturnService,
-  settleInvoiceRefundService,
-} from "./invoice.service.js";
+import { createInvoiceService, updateInvoiceService } from "./invoice.service.js";
 import Invoice from "../models/manage/invoice.model.js";
 
 /* =========================================================
@@ -1887,7 +1876,6 @@ const generateInvoiceForOrder = async (order) => {
       gstin: order.gstNumber || "",
       contactPerson: order.customerName,
       contactNumber: order.customerPhone,
-      email: order.customerEmail || "", // NEW — so the invoice-level ledger has an email to show too
     },
     items,
     summary: {
@@ -1896,6 +1884,11 @@ const generateInvoiceForOrder = async (order) => {
     },
     notes: `Manual Order: ${order.orderId}`,
     status: "issued",
+    // Links this invoice back to the manual order that created it, so a
+    // refund settled later on the invoice (settleInvoiceRefundService) can
+    // mirror its state back onto this order for display purposes.
+    sourceOrderId: order.orderId,
+    sourceOrderType: "manual",
   };
 
   const invoice = await createInvoiceService(invoicePayload);
@@ -1919,22 +1912,23 @@ const generateInvoiceForOrder = async (order) => {
 };
 
 /**
- * Re-syncs the invoice after a return/partial return: rebuilds the line
- * items to reflect only what's still active on the order (so the schema's
- * pre-save hook recomputes totals to match), and re-derives paidAmount from
- * how much the company has actually retained after any refunds already
- * paid out (order.partialRefundAmount).
- */
-/**
  * The ONE place that keeps an order's linked real Invoice in sync with
  * whatever's currently true about the order — items still active (after
- * any returns), and how much the company has actually net-retained after
- * any refunds/credits paid out. Called after EVERY mutation that could
- * change either of those: order creation, a return, a manual payment-status
- * change, a refund/credit settlement, or a cancellation. Previously this
- * only ran after returns, which is why marking an order "Paid" or settling
- * a refund never touched the invoice — it went stale and showed numbers
- * that didn't match the order anymore.
+ * any returns), how much the company has actually net-retained after any
+ * refunds/credits paid out, AND (new) how much is currently owed back to
+ * the customer. Called after EVERY mutation that could change any of
+ * that: order creation, a return, a manual payment-status change, a
+ * cancellation, or a settlement (which now happens on the invoice side
+ * and calls this indirectly via the invoice service's order-sync).
+ *
+ * IMPORTANT: this function no longer decides HOW a refund gets paid down
+ * (cash vs store credit) — it only ever reports "this much is currently
+ * owed" (refundableAmount) to the invoice. The invoice's own
+ * settleInvoiceRefundService is the single place that actually pays that
+ * amount down and writes refund history; once it does, it mirrors the
+ * result back onto this order (paymentStatus, partialRefundAmount,
+ * refundHistory) purely so anything still reading the order directly
+ * keeps showing accurate numbers.
  */
 const resyncInvoiceForOrder = async (order) => {
   if (!order.invoiceId) return null; // order predates invoicing
@@ -1958,6 +1952,31 @@ const resyncInvoiceForOrder = async (order) => {
   // empty item list to catch this case.
   const status = order.orderStatus === "cancelled" || items.length === 0 ? "cancelled" : undefined;
 
+  /* ---------- REPORT REFUND STATE TO THE INVOICE ----------
+     How much is owed right now: for a cancelled order it's the full
+     grandTotal minus whatever's already been settled; for a return it's
+     the value of everything actually returned minus whatever's already
+     been settled. Only reported as "owed" while the order's own
+     paymentStatus is still in a pending-refund state — once the invoice
+     settles it down to "refunded", order.paymentStatus gets synced back
+     to "refunded" too, at which point this naturally reports 0. */
+  const totalReturnedValue = (order.returnRequests || []).reduce(
+    (sum, rr) => sum + (rr.items || []).reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0),
+    0
+  );
+  const owedBasis = order.orderStatus === "cancelled" ? Number(order.refundAmount || 0) : totalReturnedValue;
+  const refundableAmount = ["refund_pending", "partial_refunded"].includes(order.paymentStatus)
+    ? Math.max(owedBasis - Number(order.partialRefundAmount || 0), 0)
+    : 0;
+  const refundStatus =
+    order.paymentStatus === "refunded"
+      ? "refunded"
+      : order.paymentStatus === "partial_refunded"
+      ? "partial_refunded"
+      : order.paymentStatus === "refund_pending"
+      ? "refund_pending"
+      : "none";
+
   const updated = await updateInvoiceService({
     invoiceId: order.invoiceId,
     data: {
@@ -1965,6 +1984,11 @@ const resyncInvoiceForOrder = async (order) => {
       summary: { paidAmount: netPaid },
       ...(status ? { status } : {}),
       notes: `Synced with order ${order.orderId} on ${new Date().toLocaleDateString("en-IN")}`,
+      // Refund-state fields consumed by invoice.model.js / invoice.service.js.
+      refundStatus,
+      refundableAmount,
+      partialRefundAmount: Number(order.partialRefundAmount || 0),
+      refundedAt: order.refundedAt || null,
     },
   });
 
@@ -2237,11 +2261,14 @@ export const getManualOrderService = async (orderId) => {
   }
 
   // Reverse lookup: did some OTHER order's return get settled as store
-  // credit that was then spent on THIS order? This is looked up fresh every
-  // time (not relying on anything stashed on this order itself), so it
-  // works for every order — including ones created before this lookup
-  // existed — not just ones created going forward.
-  const creditsReceived = await ManualOrder.aggregate([
+  // credit (on ITS invoice) that was then spent on THIS order? Credit
+  // notes now live entirely on Invoice.refundHistory (see
+  // invoice.service.js -> settleInvoiceRefundService), so this looks
+  // straight at Invoice rather than at other ManualOrder documents. Looked
+  // up fresh every time, so it works for every order regardless of when
+  // it was created.
+  const creditsReceived = await Invoice.aggregate([
+    { $match: { isDeleted: false } },
     { $unwind: "$refundHistory" },
     {
       $match: {
@@ -2252,57 +2279,38 @@ export const getManualOrderService = async (orderId) => {
     {
       $project: {
         _id: 0,
-        sourceOrderId: "$orderId",
-        sourceInvoiceId: "$invoiceId",
+        sourceOrderId: "$sourceOrderId",
+        sourceOrderType: "$sourceOrderType",
+        sourceInvoiceNumber: "$invoiceNumber",
         amount: "$refundHistory.amount",
         refundedAt: "$refundHistory.refundedAt",
-        // What was actually returned to generate this credit — so it never
-        // shows up as just a bare order ID with no context.
-        returnedItems: {
-          $reduce: {
-            input: { $ifNull: ["$returnRequests", []] },
-            initialValue: [],
-            in: { $concatArrays: ["$$value", { $ifNull: ["$$this.items", []] }] },
-          },
-        },
+        // What was actually returned on the source invoice — so it never
+        // shows up as just a bare amount with no context.
+        returnedItems: "$items",
       },
     },
-    // Short human-facing invoice number instead of the long MORD-<uuid>.
-    {
-      $lookup: {
-        from: Invoice.collection.name,
-        localField: "sourceInvoiceId",
-        foreignField: "invoiceId",
-        as: "_sourceInvoice",
-      },
-    },
-    {
-      $addFields: {
-        sourceInvoiceNumber: { $arrayElemAt: ["$_sourceInvoice.invoiceNumber", 0] },
-      },
-    },
-    { $project: { _sourceInvoice: 0, sourceInvoiceId: 0 } },
+    { $sort: { refundedAt: -1 } },
   ]);
   order.creditsReceived = creditsReceived;
 
   // Enrich this order's own refundHistory entries with the short invoice
   // number for whatever they were applied to (credit_note entries only) —
   // so the "Refund history" section can show that instead of a bare
-  // MORD-<uuid> for the order the credit ended up on.
+  // MORD-<uuid> for the order the credit ended up on. This still reads
+  // order.refundHistory itself (kept in sync by the invoice side whenever
+  // a settlement happens — see resyncInvoiceForOrder / invoice.service.js).
   const appliedOrderIds = (order.refundHistory || [])
     .filter((r) => r.method === "credit_note" && r.appliedToOrderId)
     .map((r) => r.appliedToOrderId);
   if (appliedOrderIds.length > 0) {
-    const appliedOrders = await ManualOrder.find({ orderId: { $in: appliedOrderIds } })
-      .select("orderId invoiceId")
+    const appliedInvoices = await Invoice.find({
+      sourceOrderId: { $in: appliedOrderIds },
+      isDeleted: false,
+    })
+      .select("sourceOrderId invoiceNumber")
       .lean();
-    const invoiceIds = appliedOrders.map((o) => o.invoiceId).filter(Boolean);
-    const invoices = invoiceIds.length
-      ? await Invoice.find({ invoiceId: { $in: invoiceIds } }).select("invoiceId invoiceNumber").lean()
-      : [];
-    const invoiceNumberByInvoiceId = Object.fromEntries(invoices.map((i) => [i.invoiceId, i.invoiceNumber]));
     const invoiceNumberByOrderId = Object.fromEntries(
-      appliedOrders.map((o) => [o.orderId, invoiceNumberByInvoiceId[o.invoiceId] || null])
+      appliedInvoices.map((inv) => [inv.sourceOrderId, inv.invoiceNumber])
     );
     order.refundHistory = (order.refundHistory || []).map((r) =>
       r.appliedToOrderId && invoiceNumberByOrderId[r.appliedToOrderId]
@@ -2601,6 +2609,14 @@ export const cancelManualOrderService = async (orderId, currentUser, reason) => 
 
 /* =========================================================
    MANUAL RETURN (no stock to restore — item identified by name only)
+   NOTE: the "refund it right now" (refundNow) path below still writes
+   directly to order.partialRefundAmount / order.paymentStatus /
+   order.refundHistory, because it's an atomic part of recording the
+   return itself (staff tick one box: "return + refund together"). Going
+   back later to settle a refund that was NOT paid at return time is now
+   exclusively done on the invoice (settleInvoiceRefundService) — see
+   resyncInvoiceForOrder, which reports the resulting "still owed" amount
+   to the invoice right after this saves.
 ========================================================= */
 export const createManualReturnService = async (data, currentUser) => {
   const { orderId, returnItems, refundNow, refundMethod, notes } = data;
@@ -2719,44 +2735,6 @@ export const createManualReturnService = async (data, currentUser) => {
     await syncInvoiceForReturn(order);
   } catch (err) {
     console.error("Invoice auto-update failed on manual return:", err.message);
-  }
-
-  /* ---------- NEW — MIRROR THIS RETURN ONTO THE LINKED INVOICE ----------
-     This is what makes it show up on the invoice-level Customer Ledger /
-     Credit Notes pages (which now read purely from the Invoice collection
-     so they also cover plain manual invoices and ecommerce-order
-     invoices, not just manual orders). Non-blocking — a failure here
-     never rolls back the order-level return, which has already been
-     recorded above. */
-  if (order.invoiceId) {
-    try {
-      await addInvoiceReturnService(
-        {
-          invoiceId: order.invoiceId,
-          items: validatedItems.map((v) => ({
-            description: v.variantName ? `${v.productName} - ${v.variantName}` : v.productName,
-            qty: v.quantity,
-            price: v.price,
-            reason: v.reason,
-          })),
-          notes: notes || null,
-        },
-        currentUser
-      );
-
-      if (refundNow) {
-        await settleInvoiceRefundService(
-          {
-            invoiceId: order.invoiceId,
-            amount: refundableAmount,
-            method: refundMethod,
-          },
-          currentUser
-        );
-      }
-    } catch (err) {
-      console.error("Invoice return/refund mirror failed on manual return:", err.message);
-    }
   }
 
   await PermissionAudit.create({
@@ -3074,8 +3052,10 @@ export const getManualOrderAnalyticsService = async (query) => {
      = 0  -> "settled"
 
    NOTE: this reads paymentStatus/refundHistory/partialRefundAmount as the
-   source of truth. If a cancellation refund is later paid out by some other
-   means, update that order's paymentStatus (e.g. to "refunded") so it stops
+   source of truth ON THE ORDER — these fields stay accurate because
+   resyncInvoiceForOrder + the invoice's settlement flow mirror every
+   settlement back onto the order. If that mirror is ever skipped, update
+   the order directly (e.g. paymentStatus -> "refunded") so it stops
    showing up as owed here.
 ========================================================= */
 export const getCustomerBalanceLedgerService = async (query) => {
@@ -3287,371 +3267,6 @@ export const getCustomerBalanceLedgerService = async (query) => {
       endDate: endDate || null,
       search: search || null,
       balanceStatus: balanceStatus || null,
-    },
-  };
-};
-
-/* =========================================================
-   SETTLE A PENDING REFUND WITH STORE CREDIT
-   Covers the "customer said they'll take it next time" case: instead of
-   physically handing back cash for a return/cancellation, staff apply the
-   amount they're owed as a discount on a new order. This just records that
-   the old order's refund has been settled that way — it does NOT touch the
-   new order's numbers; staff still enter the discount manually on the new
-   order (see CreateOrderPage). This only exists so the old order stops
-   showing up as "we owe customer" once the credit has actually been used.
-========================================================= */
-/* =========================================================
-   SETTLE A PENDING REFUND (cash payout OR store credit)
-   Covers both:
-     - "I've physically handed the customer their refund" (method: cash/upi/
-       bank_transfer/card/other) — the normal case after a return/cancel.
-     - "Customer said they'll take it next time" (method: credit_note) —
-       the amount is applied as a discount on a new order instead (see
-       CreateOrderPage's credit lookup), and this just records that the old
-       order's refund has now been used up.
-   Either way, this is the ONLY way a "refund_pending" / "partial_refunded"
-   order moves toward "refunded" — createManualReturnService only sets that
-   automatically when refundNow was ticked at return time; if it wasn't,
-   this is how staff go back and settle it later.
-========================================================= */
-export const settleOrderRefundService = async (data, currentUser) => {
-  const { orderId, amount, method = "credit_note", reference, appliedToOrderId, notes } = data;
-
-  const employee = await Employee.findOne({ email: currentUser.email });
-  if (!employee) {
-    const error = new Error("Employee not found");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const order = await ManualOrder.findOne({ orderId });
-  if (!order) {
-    const error = new Error("Manual order not found");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  if (!["refund_pending", "partial_refunded"].includes(order.paymentStatus)) {
-    const error = new Error(`This order has no pending refund to settle (currently "${order.paymentStatus}")`);
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const allowedMethods = ["cash", "upi", "bank_transfer", "card", "other", "credit_note"];
-  if (!allowedMethods.includes(method)) {
-    const error = new Error(`method must be one of: ${allowedMethods.join(", ")}`);
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const creditAmount = Number(amount);
-  if (!creditAmount || creditAmount <= 0) {
-    const error = new Error("amount must be a positive number");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const isCancellation = order.orderStatus === "cancelled";
-  let outstanding;
-
-  if (isCancellation) {
-    outstanding = Math.max(Number(order.refundAmount || 0) - Number(order.partialRefundAmount || 0), 0);
-  } else {
-    const totalReturnedValue = (order.returnRequests || []).reduce(
-      (sum, rr) =>
-        sum + (rr.items || []).reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0),
-      0
-    );
-    outstanding = Math.max(totalReturnedValue - Number(order.partialRefundAmount || 0), 0);
-  }
-
-  if (creditAmount > outstanding + 0.01) {
-    const error = new Error(
-      `Amount (${creditAmount}) is more than what's actually owed on this order (${outstanding.toFixed(2)})`
-    );
-    error.statusCode = 400;
-    throw error;
-  }
-
-  order.partialRefundAmount = Number(order.partialRefundAmount || 0) + creditAmount;
-  order.paymentStatus = creditAmount >= outstanding - 0.01 ? "refunded" : "partial_refunded";
-  order.refundedAt = new Date();
-  const refundId = `MANUAL-${uuidv6()}`;
-  order.refundHistory.push({
-    refundId,
-    amount: creditAmount,
-    method,
-    refundedBy: employee.email,
-    refundedAt: new Date(),
-    refundStatus: "processed",
-    appliedToOrderId: appliedToOrderId || null,
-  });
-  order.notes = [
-    order.notes,
-    method === "credit_note"
-      ? `₹${creditAmount} credited toward ${appliedToOrderId ? `order ${appliedToOrderId}` : "a later purchase"}${
-          notes ? ` — ${notes}` : ""
-        }`
-      : `₹${creditAmount} refunded via ${method}${reference ? ` (ref: ${reference})` : ""}${
-          notes ? ` — ${notes}` : ""
-        }`,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-
-  await order.save();
-
-  /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ---------- */
-  try {
-    await resyncInvoiceForOrder(order);
-  } catch (err) {
-    console.error("Invoice sync failed on refund settle:", err.message);
-  }
-
-  /* ---------- NEW — MIRROR THIS SETTLEMENT ONTO THE LINKED INVOICE ----------
-     Same reasoning as in createManualReturnService above: the
-     invoice-level Credit Notes / Customer Ledger pages read straight from
-     Invoice.refundHistory, so this settlement needs to land there too, not
-     just on the ManualOrder document. If the credit was applied toward
-     ANOTHER manual order (appliedToOrderId), resolve that order's own
-     invoiceId so the invoice-level credit note links to the right
-     invoice (not a bare order ID). */
-  if (order.invoiceId) {
-    try {
-      let appliedToInvoiceId = null;
-      if (appliedToOrderId) {
-        const appliedOrderForInvoice = await ManualOrder.findOne({ orderId: appliedToOrderId })
-          .select("invoiceId")
-          .lean();
-        appliedToInvoiceId = appliedOrderForInvoice?.invoiceId || null;
-      }
-
-      await settleInvoiceRefundService(
-        {
-          invoiceId: order.invoiceId,
-          amount: creditAmount,
-          method,
-          reference,
-          appliedToInvoiceId,
-          notes,
-        },
-        currentUser
-      );
-    } catch (err) {
-      console.error("Invoice refund-settle mirror failed on refund settle:", err.message);
-    }
-  }
-
-  await PermissionAudit.create({
-    permissionAuditId: uuidv6(),
-    actionBy: employee._id,
-    actionByEmail: employee.email,
-    actionFor: order._id,
-    actionForEmail: order.customerEmail,
-    permission: "manual_order_refund_settle",
-    action: "update",
-    meta: { orderId: order.orderId, amount: creditAmount, method, appliedToOrderId: appliedToOrderId || null },
-  });
-
-  // If this credit was applied straight onto a new order (the
-  // CreateOrderPage "Check credit" flow), pull that order's details too so
-  // the instantly-downloaded PDF shows real context, not just an ID.
-  let appliedOrderDate = null;
-  let appliedOrderGrandTotal = null;
-  let appliedOrderItems = [];
-  let appliedInvoiceNumber = null;
-  if (appliedToOrderId) {
-    const appliedOrder = await ManualOrder.findOne({ orderId: appliedToOrderId }).lean();
-    if (appliedOrder) {
-      appliedOrderDate = appliedOrder.createdAt;
-      appliedOrderGrandTotal = appliedOrder.grandTotal;
-      appliedOrderItems = appliedOrder.items || [];
-      if (appliedOrder.invoiceId) {
-        const appliedInvoice = await Invoice.findOne({ invoiceId: appliedOrder.invoiceId })
-          .select("invoiceNumber")
-          .lean();
-        appliedInvoiceNumber = appliedInvoice?.invoiceNumber || null;
-      }
-    }
-  }
-
-  // The order ID (MORD-<uuid>) is long and not something a customer reads
-  // easily — the short invoice number is the human-facing reference, so
-  // pull that in too wherever we have an invoiceId to look up.
-  let sourceInvoiceNumber = null;
-  if (order.invoiceId) {
-    const sourceInvoice = await Invoice.findOne({ invoiceId: order.invoiceId }).select("invoiceNumber").lean();
-    sourceInvoiceNumber = sourceInvoice?.invoiceNumber || null;
-  }
-
-  return {
-    refundId,
-    orderId: order.orderId,
-    sourceInvoiceNumber,
-    orderDate: order.createdAt,
-    customerName: order.customerName,
-    customerPhone: order.customerPhone,
-    customerEmail: order.customerEmail,
-    paymentStatus: order.paymentStatus,
-    amountSettled: creditAmount,
-    method,
-    refundedBy: employee.email,
-    appliedToOrderId: appliedToOrderId || null,
-    appliedInvoiceNumber,
-    appliedOrderDate,
-    appliedOrderGrandTotal,
-    appliedOrderItems,
-    remainingOwed: Math.max(outstanding - creditAmount, 0),
-    sourceOrderGstPercentage: order.gstPercentage || 0,
-    // What was actually returned on this order — so a downloaded credit
-    // note PDF shows real products, not just a bare amount.
-    returnedItems: (order.returnRequests || []).reduce((all, rr) => all.concat(rr.items || []), []),
-  };
-};
-
-// Old name kept as an alias — CreateOrderPage's credit-apply flow already
-// calls this via the same route/controller.
-export const settleRefundWithCreditService = settleOrderRefundService;
-
-/* =========================================================
-   CREDIT NOTES LIST
-   Every refundHistory entry across every order where method === "credit_note"
-   — i.e. every time staff recorded "customer will take it next time"
-   instead of a cash payout. Used to power a dedicated Credit Notes page and
-   to let staff re-download a specific credit note's PDF later.
-========================================================= */
-export const getCreditNotesService = async (query) => {
-  const { search, startDate, endDate } = query;
-
-  const match = {};
-  if (startDate || endDate) {
-    match["refundHistory.refundedAt"] = {};
-    if (startDate) {
-      const from = new Date(startDate);
-      if (!Number.isNaN(from.getTime())) match["refundHistory.refundedAt"].$gte = from;
-    }
-    if (endDate) {
-      const to = new Date(endDate);
-      if (!Number.isNaN(to.getTime())) {
-        to.setHours(23, 59, 59, 999);
-        match["refundHistory.refundedAt"].$lte = to;
-      }
-    }
-  }
-
-  const pipeline = [
-    { $unwind: "$refundHistory" },
-    { $match: { "refundHistory.method": "credit_note", ...match } },
-    {
-      $project: {
-        _id: 0,
-        refundId: "$refundHistory.refundId",
-        amount: "$refundHistory.amount",
-        refundedBy: "$refundHistory.refundedBy",
-        refundedAt: "$refundHistory.refundedAt",
-        refundStatus: "$refundHistory.refundStatus",
-        appliedToOrderId: "$refundHistory.appliedToOrderId",
-        sourceOrderId: "$orderId",
-        sourceOrderDate: "$createdAt",
-        sourceOrderGrandTotal: "$grandTotal",
-        sourceOrderGstPercentage: "$gstPercentage",
-        sourceInvoiceId: "$invoiceId",
-        customerName: "$customerName",
-        customerPhone: "$customerPhone",
-        customerEmail: "$customerEmail",
-        // Every item ever returned on this order (across all its return
-        // requests) — so a credit note actually shows WHAT the credit is
-        // for, not just a bare rupee amount. Flattened into one list since
-        // a single credit-note settlement usually covers everything owed
-        // on the order at that point, not just one specific return.
-        returnedItems: {
-          $reduce: {
-            input: { $ifNull: ["$returnRequests", []] },
-            initialValue: [],
-            in: { $concatArrays: ["$$value", { $ifNull: ["$$this.items", []] }] },
-          },
-        },
-      },
-    },
-    // Pull in the actual new order this credit was spent on — a bare order
-    // ID means nothing to a customer, they need to see what they bought
-    // with it and when.
-    {
-      $lookup: {
-        from: ManualOrder.collection.name,
-        localField: "appliedToOrderId",
-        foreignField: "orderId",
-        as: "_appliedOrder",
-      },
-    },
-    { $unwind: { path: "$_appliedOrder", preserveNullAndEmptyArrays: true } },
-    {
-      $addFields: {
-        appliedOrderDate: "$_appliedOrder.createdAt",
-        appliedOrderGrandTotal: "$_appliedOrder.grandTotal",
-        appliedOrderItems: { $ifNull: ["$_appliedOrder.items", []] },
-        appliedInvoiceId: "$_appliedOrder.invoiceId",
-      },
-    },
-    // Order IDs (MORD-<uuid>) are long and not something anyone reads
-    // easily — look up the short, human-facing invoice number for both the
-    // source order and (if used) the order it was applied to.
-    {
-      $lookup: {
-        from: Invoice.collection.name,
-        localField: "sourceInvoiceId",
-        foreignField: "invoiceId",
-        as: "_sourceInvoice",
-      },
-    },
-    {
-      $lookup: {
-        from: Invoice.collection.name,
-        localField: "appliedInvoiceId",
-        foreignField: "invoiceId",
-        as: "_appliedInvoice",
-      },
-    },
-    {
-      $addFields: {
-        sourceInvoiceNumber: { $arrayElemAt: ["$_sourceInvoice.invoiceNumber", 0] },
-        appliedInvoiceNumber: { $arrayElemAt: ["$_appliedInvoice.invoiceNumber", 0] },
-      },
-    },
-    { $project: { _appliedOrder: 0, _sourceInvoice: 0, _appliedInvoice: 0, sourceInvoiceId: 0, appliedInvoiceId: 0 } },
-    { $sort: { refundedAt: -1 } },
-  ];
-
-  if (search && search.trim()) {
-    const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    pipeline.push({
-      $match: {
-        $or: [
-          { customerName: regex },
-          { customerPhone: regex },
-          { customerEmail: regex },
-          { sourceOrderId: regex },
-          { refundId: regex },
-        ],
-      },
-    });
-  }
-
-  const creditNotes = await ManualOrder.aggregate(pipeline);
-
-  const totalIssued = creditNotes.reduce((sum, c) => sum + Number(c.amount || 0), 0);
-  const totalApplied = creditNotes
-    .filter((c) => c.appliedToOrderId)
-    .reduce((sum, c) => sum + Number(c.amount || 0), 0);
-
-  return {
-    creditNotes,
-    summary: {
-      totalCreditNotes: creditNotes.length,
-      totalIssued,
-      totalApplied,
-      totalUnapplied: Math.max(totalIssued - totalApplied, 0),
     },
   };
 };
