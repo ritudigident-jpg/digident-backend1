@@ -276,7 +276,6 @@
 // const Invoice = model("Invoice", invoiceSchema);
 // export default Invoice;
 
-
 import mongoose from "mongoose";
 import { v6 as uuidv6 } from "uuid";
 const { Schema, model } = mongoose;
@@ -339,6 +338,15 @@ const invoiceItemSchema = new Schema(
       min: 0,
       max: 100,
     },
+    // How much of this line has already been returned — set only by
+    // createInvoiceReturnService (standalone/"Create Invoice" invoices).
+    // qty itself is never mutated so the invoice stays an accurate
+    // historical record of what was originally billed.
+    returnedQty: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     // ── Computed fields (set by pre-save hook) ──────────────────────────────
     grossAmount: {
       // qty × price (before discount, inclusive of GST)
@@ -380,6 +388,35 @@ const invoiceItemSchema = new Schema(
       default: 0,
       min: 0,
     },
+  },
+  { _id: false }
+);
+
+/* =========================================================================
+   RETURN REQUEST (standalone/"Create Invoice" invoices only)
+   One entry per return recorded directly on an invoice that has no source
+   order (sourceOrderId === null) — written only by createInvoiceReturnService
+   in invoice.service.js. A manual-order invoice's returns live on the
+   ManualOrder instead (returnRequests) and just get mirrored here; an
+   ecommerce invoice's returns live on the Order. This array exists purely
+   so a standalone invoice — which has no order behind it — has somewhere
+   to keep its own return history.
+   ========================================================================= */
+const invoiceReturnRequestSchema = new Schema(
+  {
+    requestId: { type: String, trim: true, required: true },
+    items: [
+      {
+        itemId: { type: String, trim: true, required: true },
+        description: { type: String, trim: true, default: "" },
+        quantity: { type: Number, required: true, min: 1 },
+        price: { type: Number, required: true, min: 0 },
+        reason: { type: String, trim: true, default: null },
+      },
+    ],
+    processedBy: { type: String, trim: true, default: "" }, // employee email
+    requestedAt: { type: Date, default: Date.now },
+    processedAt: { type: Date, default: null },
   },
   { _id: false }
 );
@@ -570,6 +607,14 @@ const invoiceSchema = new Schema(
     },
     refundHistory: {
       type: [refundHistoryEntrySchema],
+      default: [],
+    },
+
+    /* ================= RETURNS (standalone invoices only) =================
+       Populated only by createInvoiceReturnService, only when
+       sourceOrderId is null. See invoiceReturnRequestSchema above. */
+    returns: {
+      type: [invoiceReturnRequestSchema],
       default: [],
     },
   },

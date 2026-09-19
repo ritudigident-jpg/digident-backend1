@@ -297,7 +297,6 @@
 // };
 
 
-
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -306,8 +305,57 @@ import { v6 as uuidv6 } from "uuid";
 import Employee from "../models/manage/employee.model.js";
 import ManualOrder from "../models/manually order/manualOrder.model.js";
 
-// ... getDueDateFromTerms, generateCustomerNo unchanged ...
+const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
+  const date = new Date(invoiceDate);
+  const text = String(paymentTerms || "").toLowerCase();
+  const match = text.match(/(\d+)\s*days?/);
+  const days = match ? Number(match[1]) : 10;
+  date.setDate(date.getDate() + days);
+  return date;
+};
 
+export const generateCustomerNo = async ({
+  customerNo,
+  contactPerson,
+}) => {
+
+  // CASE 1
+  // customerNo already sent from frontend
+
+  if (customerNo) {
+    return customerNo;
+  }
+
+  // CASE 2
+  // find existing customer by contactPerson
+
+  const existingCustomer = await Invoice.findOne({
+    isDeleted: false,
+
+    "billTo.contactPerson": {
+      $regex: new RegExp(
+        `^${contactPerson.trim()}$`,
+        "i"
+      ),
+    },
+  }).sort({ createdAt: 1 });
+
+  // Existing customer found
+
+  if (existingCustomer) {
+    return existingCustomer.customerNo;
+  }
+
+  // CASE 3
+  // generate next customer number
+
+  const lastCustomer = await Invoice.findOne({})
+    .sort({ customerNo: -1 })
+    .select("customerNo");
+
+  return lastCustomer
+    ? lastCustomer.customerNo + 1 : 1; 
+};
 export const createInvoiceService = async (data) => {
   const numbers = await generateInvoiceNumbers();
   const invoiceDate = data.invoiceDate ? new Date(data.invoiceDate) : new Date();
@@ -774,5 +822,184 @@ export const getInvoiceCreditNotesService = async (query) => {
       totalApplied,
       totalUnapplied: Math.max(totalIssued - totalApplied, 0),
     },
+  };
+};
+/* =========================================================================
+   RECORD A RETURN DIRECTLY ON A STANDALONE INVOICE
+   ("Create Invoice" flow — no manual order, no ecommerce order behind it,
+   customer called in and staff created the invoice by hand).
+
+   For a manual-order invoice, returns are recorded on the ManualOrder
+   (createManualReturnService) and mirrored onto the invoice automatically.
+   For an ecommerce invoice, returns go through the ecommerce return-request
+   flow (untouched — real Razorpay refunds). THIS function is only for an
+   invoice with sourceOrderId === null: it is itself the only record of the
+   order, so the return has to be recorded straight on it.
+
+   It reduces the returned line items' available quantity (item.returnedQty),
+   works out how much that's worth (GST-inclusive, after any discount, using
+   the item's own totalAmount/qty rate so it matches what the customer was
+   actually charged), and either:
+     - settles it immediately (refundNow: true) — pushes straight into
+       refundHistory, same shape settleInvoiceRefundService writes, or
+     - leaves it as a pending amount (refundableAmount) for the invoice's
+       "Settle" button (settleInvoiceRefundService) to pay down later.
+   ========================================================================= */
+const computeRefundStatus = (refundableAmount, partialRefundAmount) => {
+  if (refundableAmount > 0.01) {
+    return partialRefundAmount > 0.01 ? "partial_refunded" : "refund_pending";
+  }
+  return partialRefundAmount > 0.01 ? "refunded" : "none";
+};
+
+export const createInvoiceReturnService = async (data, currentUser) => {
+  const { invoiceId, returnItems, refundNow, refundMethod, reference, notes } = data;
+
+  const employee = await Employee.findOne({ email: currentUser.email });
+  if (!employee) {
+    const error = new Error("Employee not found");
+    error.statusCode = 404;
+    error.errorCode = "EMPLOYEE_NOT_FOUND";
+    throw error;
+  }
+
+  const invoice = await Invoice.findOne({ invoiceId, isDeleted: false });
+  if (!invoice) {
+    const error = new Error("Invoice not found");
+    error.statusCode = 404;
+    error.errorCode = "INVOICE_NOT_FOUND";
+    throw error;
+  }
+
+  // This is the whole point of the guard: a manual-order invoice already
+  // gets its returns recorded on the order (createManualReturnService) and
+  // mirrored here automatically; an ecommerce invoice goes through the
+  // ecommerce return-request flow. Recording a return here too would double
+  // count the refund. Only a standalone ("Create Invoice") invoice has no
+  // other place a return can be recorded.
+  if (invoice.sourceOrderId) {
+    const error = new Error(
+      invoice.sourceOrderType === "manual"
+        ? "This invoice belongs to a manual order — record the return on that order instead."
+        : "This invoice belongs to an ecommerce order — record the return through the order's return-request flow instead."
+    );
+    error.statusCode = 400;
+    error.errorCode = "INVOICE_HAS_SOURCE_ORDER";
+    throw error;
+  }
+
+  if (!Array.isArray(returnItems) || returnItems.length === 0) {
+    const error = new Error("returnItems are required");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const validatedItems = [];
+  let refundableAmountDelta = 0;
+
+  for (const ret of returnItems) {
+    const { itemId, quantity, reason } = ret;
+    const qty = Number(quantity);
+
+    if (!itemId || !qty || qty <= 0) {
+      const error = new Error("Each return item needs a valid itemId and quantity");
+      error.statusCode = 400;
+      error.errorCode = "VALIDATION_ERROR";
+      throw error;
+    }
+
+    const item = invoice.items.find((i) => i.itemId === itemId);
+    if (!item) {
+      const error = new Error(`Invoice item not found: ${itemId}`);
+      error.statusCode = 404;
+      error.errorCode = "ITEM_NOT_FOUND";
+      throw error;
+    }
+
+    const availableQty = Number(item.qty) - Number(item.returnedQty || 0);
+    if (qty > availableQty) {
+      const error = new Error(
+        `Return quantity exceeds available quantity for "${item.description}" (available: ${availableQty})`
+      );
+      error.statusCode = 400;
+      error.errorCode = "INVALID_QUANTITY";
+      throw error;
+    }
+
+    // Per-unit rate from what the customer was actually charged for this
+    // line (totalAmount is GST-inclusive, post-discount), not the raw MRP —
+    // so a returned unit refunds exactly what it was sold for.
+    const perUnitAmount = Number(item.qty) > 0 ? Number(item.totalAmount) / Number(item.qty) : 0;
+    const lineRefundAmount = Math.round(perUnitAmount * qty * 100) / 100;
+
+    item.returnedQty = Number(item.returnedQty || 0) + qty;
+    refundableAmountDelta += lineRefundAmount;
+
+    validatedItems.push({
+      itemId: item.itemId,
+      description: item.description,
+      quantity: qty,
+      price: perUnitAmount,
+      reason: reason || "Return",
+    });
+  }
+
+  const requestId = `RET-${uuidv6()}`;
+  invoice.returns.push({
+    requestId,
+    items: validatedItems,
+    processedBy: employee.email,
+    requestedAt: new Date(),
+    processedAt: new Date(),
+  });
+
+  let refundId = null;
+
+  if (refundNow) {
+    const allowedMethods = ["cash", "upi", "bank_transfer", "card", "other"];
+    if (!refundMethod || !allowedMethods.includes(refundMethod)) {
+      const error = new Error(`refundMethod is required and must be one of: ${allowedMethods.join(", ")}`);
+      error.statusCode = 400;
+      error.errorCode = "VALIDATION_ERROR";
+      throw error;
+    }
+
+    refundId = `CN-${uuidv6()}`;
+    invoice.partialRefundAmount = Number(invoice.partialRefundAmount || 0) + refundableAmountDelta;
+    invoice.refundedAt = new Date();
+    invoice.refundHistory.push({
+      refundId,
+      amount: refundableAmountDelta,
+      method: refundMethod,
+      reference: reference || null,
+      refundedBy: employee.email,
+      refundedAt: new Date(),
+      refundStatus: "processed",
+      appliedToOrderId: null,
+      notes: notes || null,
+    });
+    // Settled immediately — this return's amount never touches refundableAmount.
+    invoice.refundStatus = computeRefundStatus(Number(invoice.refundableAmount || 0), invoice.partialRefundAmount);
+  } else {
+    // Left pending — the invoice's own "Settle" action (settleInvoiceRefundService)
+    // pays this down later, same as a manual-order return.
+    invoice.refundableAmount = Number(invoice.refundableAmount || 0) + refundableAmountDelta;
+    invoice.refundStatus = computeRefundStatus(invoice.refundableAmount, Number(invoice.partialRefundAmount || 0));
+  }
+
+  await invoice.save();
+
+  return {
+    invoiceId: invoice.invoiceId,
+    invoiceNumber: invoice.invoiceNumber,
+    requestId,
+    refundId,
+    refundStatus: invoice.refundStatus,
+    refundableAmount: invoice.refundableAmount,
+    partialRefundAmount: invoice.partialRefundAmount,
+    refundProcessed: !!refundNow,
+    refundedAmount: refundableAmountDelta,
+    items: validatedItems,
   };
 };

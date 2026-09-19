@@ -18,12 +18,21 @@
 // export default router;
 import express from "express";
 import {
-  createInvoice, getInvoiceById, getInvoices, updateInvoice, deleteInvoice,
-  createInvoiceFromOrder, getInvoiceByIdForUser, deleteInvoiceByUser,
-  updateInvoiceByUser, getInvoiceCustomers, deleteAllInvoices,
+  createInvoice,
+  getInvoiceById,
+  getInvoices,
+  updateInvoice,
+  deleteInvoice,
+  createInvoiceFromOrder,
+  getInvoiceByIdForUser,
+  deleteInvoiceByUser,
+  updateInvoiceByUser,
+  getInvoiceCustomers,
+  deleteAllInvoices,
   getInvoicesByCustomerId,
   settleInvoiceCredit,      // NEW
   getInvoiceCreditNotes,    // NEW
+  createInvoiceReturn,      // NEW
 } from "../../controllers/invoice/invoice.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
@@ -38,6 +47,11 @@ router.delete("/manage/delete/:invoiceId", auth, checkPermission, deleteInvoice)
 // NEW — moved from manual order routes; credit notes now live on the invoice
 router.put("/manage/credit-settle/:invoiceId", auth, checkPermission, settleInvoiceCredit);
 router.get("/manage/credit-notes/:permission", auth, checkPermission, getInvoiceCreditNotes);
+
+// NEW — record a return on a STANDALONE invoice (sourceOrderId === null) only.
+// Manual-order invoices use /api/manual-order/return; ecommerce invoices use
+// the ecommerce return-request route.
+router.post("/manage/return/:invoiceId", auth, checkPermission, createInvoiceReturn);
 
 router.post("/create", auth, createInvoiceFromOrder);
 router.get("/get/:invoiceId", auth, getInvoiceByIdForUser);

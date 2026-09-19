@@ -755,7 +755,6 @@
 //   }
 // };
 
-
 import { createInvoiceValidator } from "./invoice.validator.js";
 import {
   createInvoiceService,
@@ -765,6 +764,7 @@ import {
   deleteInvoiceService,
   settleInvoiceRefundService,
   getInvoiceCreditNotesService,
+  createInvoiceReturnService,
 } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -1631,6 +1631,103 @@ export const getInvoiceCreditNotes = async (req, res) => {
   try {
     const data = await getInvoiceCreditNotesService(req.query);
     return sendSuccess(res, data, 200, "Credit notes fetched successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function createInvoiceReturn
+ *
+ * @route POST /api/invoice/manage/return/:invoiceId
+ *
+ * @description
+ * Records a return directly on a STANDALONE invoice — one created via
+ * "Create Invoice" with no source order (sourceOrderId === null). The
+ * customer called in, staff pulls up the invoice, picks which line items
+ * and quantities came back, and either settles the refund immediately
+ * (refundNow) or leaves it pending for the invoice's own "Settle" button
+ * (settleInvoiceCredit) to handle later.
+ *
+ * A manual-order invoice's returns belong on the ManualOrder
+ * (createManualReturnService) and an ecommerce invoice's returns belong on
+ * the ecommerce return-request flow — this endpoint refuses both and tells
+ * the caller where to go instead, so a return is never recorded twice.
+ *
+ * @process
+ * 1. Validate invoiceId param + returnItems in body.
+ * 2. Delegate to createInvoiceReturnService (guards sourceOrderId, reduces
+ *    item.returnedQty, settles now or marks refundableAmount pending).
+ * 3. Create PermissionAudit entry.
+ * 4. Return the return/refund summary.
+ *
+ * @params
+ * params: { invoiceId: string }
+ * body: {
+ *   returnItems: [{ itemId: string, quantity: number, reason?: string }],
+ *   refundNow: boolean,
+ *   refundMethod?: "cash"|"upi"|"bank_transfer"|"card"|"other" (required if refundNow),
+ *   reference?: string,
+ *   notes?: string
+ * }
+ *
+ * @response
+ * 201 {
+ *   success: true,
+ *   message: "Return recorded successfully",
+ *   data: { invoiceId, invoiceNumber, requestId, refundId, refundStatus, refundableAmount, ... }
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR / INVOICE_HAS_SOURCE_ORDER / INVALID_QUANTITY
+ * 404 - EMPLOYEE_NOT_FOUND / INVOICE_NOT_FOUND / ITEM_NOT_FOUND
+ * 500 - INTERNAL_SERVER_ERROR
+ */
+export const createInvoiceReturn = async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+    const { returnItems, refundNow, refundMethod, reference, notes } = req.body;
+
+    if (!invoiceId) {
+      return sendError(res, {
+        message: "invoiceId is required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+    if (!Array.isArray(returnItems) || returnItems.length === 0) {
+      return sendError(res, {
+        message: "returnItems are required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+
+    const data = await createInvoiceReturnService(
+      { invoiceId, returnItems, refundNow, refundMethod, reference, notes },
+      req.user
+    );
+
+    /* ---------- AUDIT LOG (non-blocking) ---------- */
+    try {
+      const employee = await Employee.findOne({ email: req.user.email });
+      if (employee) {
+        await PermissionAudit.create({
+          permissionAuditId: uuidv6(),
+          actionBy: employee._id,
+          actionByEmail: employee.email,
+          actionFor: null,
+          actionForEmail: null,
+          action: data.invoiceNumber,
+          permission: req.body.permission || "invoice.manage.return_create",
+          actionType: "Create",
+        });
+      }
+    } catch (auditErr) {
+      console.error("Audit log failed on invoice return create:", auditErr.message);
+    }
+
+    return sendSuccess(res, data, 201, "Return recorded successfully");
   } catch (error) {
     return handleError(res, error);
   }
