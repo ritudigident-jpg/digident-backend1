@@ -16,6 +16,7 @@
 // router.get("/customer/:customerNo", auth, getInvoicesByCustomerId);
 // router.get("/customers",auth, getInvoiceCustomers );
 // export default router;
+
 import express from "express";
 import {
   createInvoice,
@@ -30,9 +31,10 @@ import {
   getInvoiceCustomers,
   deleteAllInvoices,
   getInvoicesByCustomerId,
-  settleInvoiceCredit,      // NEW
-  getInvoiceCreditNotes,    // NEW
-  createInvoiceReturn,      // NEW
+  settleInvoiceCredit,        // NEW
+  getInvoiceCreditNotes,      // NEW
+  createInvoiceReturn,        // NEW
+  getCustomerCreditLookup,    // NEW
 } from "../../controllers/invoice/invoice.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
@@ -52,6 +54,12 @@ router.get("/manage/credit-notes/:permission", auth, checkPermission, getInvoice
 // Manual-order invoices use /api/manual-order/return; ecommerce invoices use
 // the ecommerce return-request route.
 router.post("/manage/return/:invoiceId", auth, checkPermission, createInvoiceReturn);
+
+// NEW — "Check credit": every invoice (manual/ecommerce/standalone) that
+// still owes this phone number money right now. Powers the "apply pending
+// credit as a discount on the new order/invoice, settle in the same step"
+// flow in both CreateOrderPage and CreateInvoicePage.
+router.get("/manage/credit-lookup/:phone", auth, checkPermission, getCustomerCreditLookup);
 
 router.post("/create", auth, createInvoiceFromOrder);
 router.get("/get/:invoiceId", auth, getInvoiceByIdForUser);

@@ -755,6 +755,7 @@
 //   }
 // };
 
+
 import { createInvoiceValidator } from "./invoice.validator.js";
 import {
   createInvoiceService,
@@ -765,6 +766,7 @@ import {
   settleInvoiceRefundService,
   getInvoiceCreditNotesService,
   createInvoiceReturnService,
+  getCustomerCreditLookupService,
 } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -1728,6 +1730,60 @@ export const createInvoiceReturn = async (req, res) => {
     }
 
     return sendSuccess(res, data, 201, "Return recorded successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function getCustomerCreditLookup
+ *
+ * @route GET /api/invoice/manage/credit-lookup/:phone
+ *
+ * @description
+ * "Check credit" — every invoice (manual-order, ecommerce, or standalone)
+ * that still owes this phone number money right now, i.e. refundStatus is
+ * "refund_pending" or "partial_refunded" and hasn't been settled yet. This
+ * powers the "Tarika A" flow used consistently across CreateOrderPage and
+ * CreateInvoicePage: a return is left pending — never settled on its own —
+ * until the customer's next order/invoice actually exists, at which point
+ * staff apply the pending amount as a discount on the new one and, in the
+ * same step, settle the old invoice with appliedToOrderId pointing at the
+ * new one. Once settled, an invoice's refundStatus is no longer
+ * refund_pending/partial_refunded, so it naturally drops out of this list.
+ *
+ * @process
+ * 1. Read phone from params.
+ * 2. Delegate to getCustomerCreditLookupService.
+ * 3. Return the total available credit + which invoices it's owed from.
+ *
+ * @params
+ * params: { phone: string }
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Credit lookup complete",
+ *   data: { available: number, sources: [{ invoiceId, invoiceNumber, sourceOrderId, sourceOrderType, orderDate, owed, ... }] }
+ * }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 500 - INTERNAL_SERVER_ERROR
+ */
+export const getCustomerCreditLookup = async (req, res) => {
+  try {
+    const { phone } = req.params;
+    if (!phone) {
+      return sendError(res, {
+        message: "phone is required",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+      });
+    }
+
+    const data = await getCustomerCreditLookupService({ phone });
+    return sendSuccess(res, data, 200, "Credit lookup complete");
   } catch (error) {
     return handleError(res, error);
   }

@@ -297,6 +297,7 @@
 // };
 
 
+
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -768,14 +769,29 @@ export const getInvoiceCreditNotesService = async (query) => {
         items: "$items",
       },
     },
-    // The order this credit was actually spent on — matched via that
-    // order's own invoice's sourceOrderId — so a bare order ID doesn't
-    // show up with no context.
+    // The order/invoice this credit was actually spent on. appliedToOrderId
+    // is either a manual/ecommerce order's own id (matched via that order's
+    // invoice's sourceOrderId) or, when the credit was applied straight onto
+    // a NEW STANDALONE invoice (no order behind it), that invoice's own
+    // invoiceId directly — so both cases resolve to real invoice details
+    // instead of a bare, contextless id.
     {
       $lookup: {
         from: Invoice.collection.name,
-        localField: "appliedToOrderId",
-        foreignField: "sourceOrderId",
+        let: { appliedId: "$appliedToOrderId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $ne: ["$$appliedId", null] },
+                  { $or: [{ $eq: ["$sourceOrderId", "$$appliedId"] }, { $eq: ["$invoiceId", "$$appliedId"] }] },
+                ],
+              },
+            },
+          },
+          { $limit: 1 },
+        ],
         as: "_appliedInvoice",
       },
     },
@@ -824,6 +840,56 @@ export const getInvoiceCreditNotesService = async (query) => {
     },
   };
 };
+
+/* =========================================================================
+   "CHECK CREDIT" LOOKUP — every invoice (manual-order, ecommerce, or
+   standalone) that still owes this phone number money right now
+   (refundStatus is "refund_pending" or "partial_refunded", i.e. NOT yet
+   settled). This is the "Tarika A" flow: a return is left pending — never
+   settled on its own — until the customer's next order/invoice actually
+   exists, at which point the pending amount is applied AND settled in the
+   same step (see settleInvoiceRefundService's appliedToOrderId). Once an
+   invoice is settled (as cash or as an already-applied credit_note), its
+   refundStatus stops being "refund_pending"/"partial_refunded", so it
+   naturally drops out of this list — nothing to double-apply.
+   ========================================================================= */
+export const getCustomerCreditLookupService = async ({ phone }) => {
+  const trimmed = String(phone || "").trim();
+  if (!trimmed) {
+    const error = new Error("phone is required");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const invoices = await Invoice.find({
+    isDeleted: false,
+    "billTo.contactNumber": trimmed,
+    refundStatus: { $in: ["refund_pending", "partial_refunded"] },
+    refundableAmount: { $gt: 0 },
+  })
+    .sort({ createdAt: 1 })
+    .select(
+      "invoiceId invoiceNumber refundableAmount refundStatus sourceOrderId sourceOrderType orderDate invoiceDate billTo.companyName billTo.contactPerson"
+    )
+    .lean();
+
+  const sources = invoices.map((inv) => ({
+    invoiceId: inv.invoiceId,
+    invoiceNumber: inv.invoiceNumber,
+    sourceOrderId: inv.sourceOrderId,
+    sourceOrderType: inv.sourceOrderType, // "manual" | "ecommerce" | null (standalone)
+    orderDate: inv.orderDate || inv.invoiceDate,
+    companyName: inv.billTo?.companyName,
+    contactPerson: inv.billTo?.contactPerson,
+    owed: Number(inv.refundableAmount || 0),
+  }));
+
+  const available = sources.reduce((sum, s) => sum + s.owed, 0);
+
+  return { available, sources };
+};
+
 /* =========================================================================
    RECORD A RETURN DIRECTLY ON A STANDALONE INVOICE
    ("Create Invoice" flow — no manual order, no ecommerce order behind it,
