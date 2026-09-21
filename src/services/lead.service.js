@@ -161,8 +161,8 @@ export const updateWhatsapp = async (id, whatsappData = {}) => {
   if (!lead) throw new Error("Lead not found");
 
   const current = lead.whatsapp?.toObject ? lead.whatsapp.toObject() : (lead.whatsapp || {});
-  lead.whatsapp = { ...current, ...whatsappData };
-   
+  const next = { ...current, ...whatsappData };
+
   if (whatsappData.sent === true && !whatsappData.sentAt && !current.sentAt) {
     next.sentAt = new Date();
   }
