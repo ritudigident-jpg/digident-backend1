@@ -162,6 +162,12 @@ export const updateWhatsapp = async (id, whatsappData = {}) => {
 
   const current = lead.whatsapp?.toObject ? lead.whatsapp.toObject() : (lead.whatsapp || {});
   lead.whatsapp = { ...current, ...whatsappData };
+   
+  if (whatsappData.sent === true && !whatsappData.sentAt && !current.sentAt) {
+    next.sentAt = new Date();
+  }
+
+  lead.whatsapp = next;
   return lead.save();
 };
 

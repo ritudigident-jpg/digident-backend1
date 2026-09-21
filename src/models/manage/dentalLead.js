@@ -107,9 +107,14 @@ const whatsappSchema = new mongoose.Schema(
       default: false,
     },
 
-    replied: {
-      type: Boolean,
-      default: false,
+    // replied: {
+    //   type: Boolean,
+    //   default: false,
+    // },
+
+     sentAt: {
+      type: Date,
+      default: null,
     },
 
     noReply: {
