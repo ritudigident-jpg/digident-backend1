@@ -1396,7 +1396,7 @@
 //         : { netBalance: -1 },
 //   });
 
-//   const customers = await ManualOrder.aggregate(pipeline);
+//   const customers = await Invoice.aggregate(pipeline);
 
 //   const summary = customers.reduce(
 //     (acc, c) => {
@@ -3026,43 +3026,36 @@ export const getManualOrderAnalyticsService = async (query) => {
 
 /* =========================================================
    CUSTOMER BALANCE LEDGER
-   Groups every manual order by customer (phone number) and works out,
-   per customer, whether the company still owes them money (unrefunded
-   returns / cancellations) or the customer still owes the company
-   (unpaid orders). Nothing here needs a separate Customer collection —
-   it's all derived from ManualOrder documents already on file.
+   Groups every INVOICE by customer (billTo phone + name) and works out,
+   per customer, whether the company still owes them money (pending
+   refunds from returns / cancellations) or the customer still owes the
+   company (unpaid invoice balance). The Invoice is the single source of
+   truth for money (manual orders, ecommerce orders and standalone
+   "Create Invoice" invoices all end up here), so the ledger no longer
+   reads ManualOrder at all.
 
-   Per order:
-     - totalReturnedValue     = value of everything returned on that order
-     - pendingReturnRefund    = totalReturnedValue - amount already paid out
-                                 via refundHistory (tracked as partialRefundAmount)
-     - cancellationRefundOwed = grandTotal, only when the order was
-                                 cancelled after being paid and hasn't been
-                                 refunded yet (paymentStatus stays
-                                 "refund_pending" for cancellations)
-     - unpaidDue              = grandTotal, only when paymentStatus is
-                                 still "pending"
+   Per invoice:
+     - totalReturnedValue = refundableAmount + partialRefundAmount
+                            (everything ever raised as a refund on this
+                             invoice: still pending + already settled)
+     - owedToCustomer     = refundableAmount
+                            (refund still pending — invoice.refundStatus
+                             is "refund_pending" / "partial_refunded")
+     - owedByCustomer     = summary.amountToPay, only for issued /
+                            partially_paid invoices (draft and cancelled
+                            invoices never count as receivable)
 
-   owedToCustomer = pendingReturnRefund + cancellationRefundOwed  (company owes)
-   owedByCustomer = unpaidDue                                     (customer owes)
-   netBalance     = owedByCustomer - owedToCustomer
+   netBalance = owedByCustomer - owedToCustomer
      > 0  -> "customer_owes"   (customer still owes the company)
      < 0  -> "company_owes"    (company owes the customer a refund)
      = 0  -> "settled"
-
-   NOTE: this reads paymentStatus/refundHistory/partialRefundAmount as the
-   source of truth ON THE ORDER — these fields stay accurate because
-   resyncInvoiceForOrder + the invoice's settlement flow mirror every
-   settlement back onto the order. If that mirror is ever skipped, update
-   the order directly (e.g. paymentStatus -> "refunded") so it stops
-   showing up as owed here.
 ========================================================= */
 export const getCustomerBalanceLedgerService = async (query) => {
   const { startDate, endDate, search, balanceStatus, sortBy } = query;
 
-  const match = {};
+  const match = { isDeleted: false };
   if (startDate || endDate) {
-    match.createdAt = {};
+    match.invoiceDate = {};
     if (startDate) {
       const from = new Date(startDate);
       if (Number.isNaN(from.getTime())) {
@@ -3071,7 +3064,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
         error.errorCode = "VALIDATION_ERROR";
         throw error;
       }
-      match.createdAt.$gte = from;
+      match.invoiceDate.$gte = from;
     }
     if (endDate) {
       const to = new Date(endDate);
@@ -3082,7 +3075,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
         throw error;
       }
       to.setHours(23, 59, 59, 999);
-      match.createdAt.$lte = to;
+      match.invoiceDate.$lte = to;
     }
   }
 
@@ -3090,54 +3083,29 @@ export const getCustomerBalanceLedgerService = async (query) => {
     { $match: match },
     {
       $addFields: {
-        totalReturnedValue: {
-          $sum: {
-            $map: {
-              input: { $ifNull: ["$returnRequests", []] },
-              as: "rr",
-              in: {
-                $sum: {
-                  $map: {
-                    input: { $ifNull: ["$$rr.items", []] },
-                    as: "it",
-                    in: { $multiply: ["$$it.price", "$$it.quantity"] },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    {
-      $addFields: {
-        pendingReturnRefund: {
-          $max: [
-            { $subtract: ["$totalReturnedValue", { $ifNull: ["$partialRefundAmount", 0] }] },
-            0,
-          ],
-        },
-        cancellationRefundOwed: {
+        // billTo.contactPerson is the customer's own name (companyName can
+        // be an organization shared by several people), so prefer it and
+        // fall back to companyName only if it was left empty.
+        customerName: {
           $cond: [
-            {
-              $and: [
-                { $eq: ["$orderStatus", "cancelled"] },
-                { $eq: ["$paymentStatus", "refund_pending"] },
-              ],
-            },
-            { $ifNull: ["$refundAmount", 0] },
+            { $gt: [{ $strLenCP: { $ifNull: ["$billTo.contactPerson", ""] } }, 0] },
+            "$billTo.contactPerson",
+            { $ifNull: ["$billTo.companyName", ""] },
+          ],
+        },
+        customerPhone: { $ifNull: ["$billTo.contactNumber", ""] },
+        invoiceTotal: { $ifNull: ["$summary.totalPayAmount", 0] },
+        owedToCustomer: { $max: [{ $ifNull: ["$refundableAmount", 0] }, 0] },
+        owedByCustomer: {
+          $cond: [
+            { $in: ["$status", ["issued", "partially_paid"]] },
+            { $max: [{ $ifNull: ["$summary.amountToPay", 0] }, 0] },
             0,
           ],
         },
-        unpaidDue: {
-          $cond: [{ $eq: ["$paymentStatus", "pending"] }, "$grandTotal", 0],
+        totalReturnedValue: {
+          $add: [{ $ifNull: ["$refundableAmount", 0] }, { $ifNull: ["$partialRefundAmount", 0] }],
         },
-      },
-    },
-    {
-      $addFields: {
-        owedToCustomer: { $add: ["$pendingReturnRefund", "$cancellationRefundOwed"] },
-        owedByCustomer: "$unpaidDue",
       },
     },
     {
@@ -3154,23 +3122,26 @@ export const getCustomerBalanceLedgerService = async (query) => {
         },
         customerPhone: { $last: "$customerPhone" },
         customerName: { $last: "$customerName" },
-        customerEmail: { $last: "$customerEmail" },
         totalOrders: { $sum: 1 },
-        totalOrderValue: { $sum: "$grandTotal" },
+        totalOrderValue: { $sum: "$invoiceTotal" },
         totalReturnedValue: { $sum: "$totalReturnedValue" },
         totalOwedToCustomer: { $sum: "$owedToCustomer" },
         totalOwedByCustomer: { $sum: "$owedByCustomer" },
-        lastOrderAt: { $max: "$createdAt" },
+        lastOrderAt: { $max: "$invoiceDate" },
         orders: {
           $push: {
-            orderId: "$orderId",
-            orderStatus: "$orderStatus",
-            paymentStatus: "$paymentStatus",
-            grandTotal: "$grandTotal",
+            invoiceId: "$invoiceId",
+            invoiceNumber: "$invoiceNumber",
+            orderId: { $ifNull: ["$sourceOrderId", "$invoiceNumber"] },
+            sourceOrderType: "$sourceOrderType",
+            invoiceStatus: "$status",
+            refundStatus: "$refundStatus",
+            grandTotal: "$invoiceTotal",
+            paidAmount: { $ifNull: ["$summary.paidAmount", 0] },
             totalReturnedValue: "$totalReturnedValue",
             owedToCustomer: "$owedToCustomer",
             owedByCustomer: "$owedByCustomer",
-            createdAt: "$createdAt",
+            createdAt: "$invoiceDate",
           },
         },
       },
@@ -3198,7 +3169,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
   if (search && search.trim()) {
     const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     pipeline.push({
-      $match: { $or: [{ customerName: regex }, { customerPhone: regex }, { customerEmail: regex }] },
+      $match: { $or: [{ customerName: regex }, { customerPhone: regex }] },
     });
   }
 
@@ -3212,7 +3183,6 @@ export const getCustomerBalanceLedgerService = async (query) => {
       _id: 0,
       customerPhone: 1,
       customerName: 1,
-      customerEmail: 1,
       totalOrders: 1,
       totalOrderValue: 1,
       totalReturnedValue: 1,
@@ -3234,7 +3204,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
         : { netBalance: -1 },
   });
 
-  const customers = await ManualOrder.aggregate(pipeline);
+  const customers = await Invoice.aggregate(pipeline);
 
   const summary = customers.reduce(
     (acc, c) => {
