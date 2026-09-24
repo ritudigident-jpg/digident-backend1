@@ -297,7 +297,6 @@
 // };
 
 
-
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -954,6 +953,18 @@ export const createInvoiceReturnService = async (data, currentUser) => {
     throw error;
   }
 
+  // NEW — a return refunds money the customer actually paid. On a "draft",
+  // "issued" (unpaid) or "cancelled" invoice nothing has been received yet,
+  // so there is nothing to give back. Only "paid" / "partially_paid" pass.
+  if (!["paid", "partially_paid"].includes(invoice.status)) {
+    const error = new Error(
+      `Return not allowed — this invoice is "${invoice.status}" and no payment has been received yet, so there is nothing to refund.`
+    );
+    error.statusCode = 400;
+    error.errorCode = "INVOICE_NOT_PAID";
+    throw error;
+  }
+
   if (!Array.isArray(returnItems) || returnItems.length === 0) {
     const error = new Error("returnItems are required");
     error.statusCode = 400;
@@ -1009,6 +1020,28 @@ export const createInvoiceReturnService = async (data, currentUser) => {
       price: perUnitAmount,
       reason: reason || "Return",
     });
+  }
+
+  // NEW — never refund more than was actually collected. Matters mostly for
+  // "partially_paid": if the customer paid 1000 of 5400, total refunds
+  // (already settled + still pending + this return) can't go above 1000.
+  // A fully "paid" invoice counts as totalPayAmount paid even if
+  // summary.paidAmount was never filled in on older records.
+  const totalPayable = Number(invoice.summary?.totalPayAmount || 0);
+  const recordedPaid = Number(invoice.summary?.paidAmount || 0);
+  const amountReceived =
+    invoice.status === "paid" ? Math.max(recordedPaid, totalPayable) : recordedPaid;
+  const alreadyCommitted =
+    Number(invoice.partialRefundAmount || 0) + Number(invoice.refundableAmount || 0);
+  const maxRefundable = Math.max(amountReceived - alreadyCommitted, 0);
+
+  if (refundableAmountDelta > maxRefundable + 0.01) {
+    const error = new Error(
+      `Refund amount (${refundableAmountDelta.toFixed(2)}) is more than what the customer has actually paid and not yet been refunded (${maxRefundable.toFixed(2)}).`
+    );
+    error.statusCode = 400;
+    error.errorCode = "REFUND_EXCEEDS_PAID";
+    throw error;
   }
 
   const requestId = `RET-${uuidv6()}`;

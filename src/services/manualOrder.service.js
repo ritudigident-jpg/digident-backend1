@@ -2298,19 +2298,31 @@ export const getManualOrderService = async (orderId) => {
   // MORD-<uuid> for the order the credit ended up on. This still reads
   // order.refundHistory itself (kept in sync by the invoice side whenever
   // a settlement happens — see resyncInvoiceForOrder / invoice.service.js).
+  // appliedToOrderId can be EITHER a new order's orderId (credit applied to
+  // a fresh manual/ecommerce order — matches Invoice.sourceOrderId) OR a
+  // standalone invoice's own invoiceId (credit applied directly on a
+  // "Create Invoice" invoice with no source order at all — matches
+  // Invoice.invoiceId instead, since that invoice IS the order). Match on
+  // both, or a credit settled straight onto a standalone invoice would
+  // never resolve to a number here.
   const appliedOrderIds = (order.refundHistory || [])
     .filter((r) => r.method === "credit_note" && r.appliedToOrderId)
     .map((r) => r.appliedToOrderId);
   if (appliedOrderIds.length > 0) {
     const appliedInvoices = await Invoice.find({
-      sourceOrderId: { $in: appliedOrderIds },
+      $or: [
+        { sourceOrderId: { $in: appliedOrderIds } },
+        { invoiceId: { $in: appliedOrderIds } },
+      ],
       isDeleted: false,
     })
-      .select("sourceOrderId invoiceNumber")
+      .select("sourceOrderId invoiceId invoiceNumber")
       .lean();
-    const invoiceNumberByOrderId = Object.fromEntries(
-      appliedInvoices.map((inv) => [inv.sourceOrderId, inv.invoiceNumber])
-    );
+    const invoiceNumberByOrderId = {};
+    appliedInvoices.forEach((inv) => {
+      if (inv.sourceOrderId) invoiceNumberByOrderId[inv.sourceOrderId] = inv.invoiceNumber;
+      invoiceNumberByOrderId[inv.invoiceId] = inv.invoiceNumber;
+    });
     order.refundHistory = (order.refundHistory || []).map((r) =>
       r.appliedToOrderId && invoiceNumberByOrderId[r.appliedToOrderId]
         ? { ...r, appliedInvoiceNumber: invoiceNumberByOrderId[r.appliedToOrderId] }
