@@ -31,10 +31,10 @@ import {
   getInvoiceCustomers,
   deleteAllInvoices,
   getInvoicesByCustomerId,
-  settleInvoiceCredit,        // NEW
-  getInvoiceCreditNotes,      // NEW
-  createInvoiceReturn,        // NEW
-  getCustomerCreditLookup,    // NEW
+  settleInvoiceCredit,
+  getInvoiceCreditNotes,
+  createInvoiceReturn,
+  getCustomerCreditLookup,
 } from "../../controllers/invoice/invoice.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
@@ -46,19 +46,16 @@ router.get("/manage/get/:permission", auth, checkPermission, getInvoices);
 router.get("/manage/get/:invoiceId/:permission", auth, checkPermission, getInvoiceById);
 router.delete("/manage/delete/:invoiceId", auth, checkPermission, deleteInvoice);
 
-// NEW — moved from manual order routes; credit notes now live on the invoice
+// Credit notes live on the invoice
 router.put("/manage/credit-settle/:invoiceId", auth, checkPermission, settleInvoiceCredit);
+// Deprecated — kept so old frontends keep working; now reads the CreditNote
+// collection. Use GET /api/credit-note/manage/get/:permission instead.
 router.get("/manage/credit-notes/:permission", auth, checkPermission, getInvoiceCreditNotes);
 
-// NEW — record a return on a STANDALONE invoice (sourceOrderId === null) only.
-// Manual-order invoices use /api/manual-order/return; ecommerce invoices use
-// the ecommerce return-request route.
+// Record a return on a STANDALONE invoice (sourceOrderId === null) only.
 router.post("/manage/return/:invoiceId", auth, checkPermission, createInvoiceReturn);
 
-// NEW — "Check credit": every invoice (manual/ecommerce/standalone) that
-// still owes this phone number money right now. Powers the "apply pending
-// credit as a discount on the new order/invoice, settle in the same step"
-// flow in both CreateOrderPage and CreateInvoicePage.
+// "Check credit": every invoice that still owes this phone number money.
 router.get("/manage/credit-lookup/:phone", auth, checkPermission, getCustomerCreditLookup);
 
 router.post("/create", auth, createInvoiceFromOrder);

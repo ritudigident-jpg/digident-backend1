@@ -446,6 +446,10 @@ const refundHistoryEntrySchema = new Schema(
     // order/invoice this credit was actually spent on.
     appliedToOrderId: { type: String, default: null },
     notes: { type: String, trim: true, default: null },
+    // NEW — when method === "credit_note", the CreditNote document this
+    // settlement produced (see models/manage/creditNote.model.js).
+    creditNoteId: { type: String, default: null },
+    creditNoteNumber: { type: String, default: null },
   },
   { _id: false }
 );
@@ -615,6 +619,16 @@ const invoiceSchema = new Schema(
        sourceOrderId is null. See invoiceReturnRequestSchema above. */
     returns: {
       type: [invoiceReturnRequestSchema],
+      default: [],
+    },
+
+    /* ================= CREDIT NOTES LINK =================
+       Every CreditNote raised against this invoice (manual or from a
+       return/cancellation) — same idea as order.invoiceId pointing at the
+       invoice. The CreditNote collection is the source of truth; this is
+       just a quick "does this invoice have credit notes?" index. */
+    creditNoteIds: {
+      type: [String],
       default: [],
     },
   },

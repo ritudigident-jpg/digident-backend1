@@ -1806,6 +1806,7 @@
 //     updatedAt: order.statusUpdatedAt,
 //   };
 // };
+
 import mongoose from "mongoose";
 import { v6 as uuidv6 } from "uuid";
 import Employee from "../models/manage/employee.model.js";
@@ -1816,6 +1817,7 @@ import { sendZohoMail } from "./ZohoEmail/zohoMail.service.js";
 import { orderConfirmationTemplate } from "../config/templates/orderConfirmationTemplate.js";
 import { createInvoiceService, updateInvoiceService } from "./invoice.service.js";
 import Invoice from "../models/manage/invoice.model.js";
+import CreditNote from "../models/manage/creditNote.model.js";
 
 /* =========================================================
    INVOICE INTEGRATION HELPERS
@@ -3118,6 +3120,57 @@ export const getCustomerBalanceLedgerService = async (query) => {
         totalReturnedValue: {
           $add: [{ $ifNull: ["$refundableAmount", 0] }, { $ifNull: ["$partialRefundAmount", 0] }],
         },
+        isCreditNote: { $literal: false },
+      },
+    },
+    /* ---------- NEW: OPEN CREDIT NOTES ----------
+       A credit note's unused balance is money the company still owes the
+       customer. Return credit notes were already paid down off the
+       invoice's refundableAmount when issued, and manual ones never touch
+       the invoice — so adding balance here never double counts. */
+    {
+      $unionWith: {
+        coll: CreditNote.collection.name,
+        pipeline: [
+          {
+            $match: {
+              isDeleted: false,
+              status: { $in: ["open", "partially_used"] },
+              balance: { $gt: 0 },
+              ...(match.invoiceDate ? { creditNoteDate: match.invoiceDate } : {}),
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              isCreditNote: { $literal: true },
+              customerName: {
+                $cond: [
+                  { $gt: [{ $strLenCP: { $ifNull: ["$billTo.contactPerson", ""] } }, 0] },
+                  "$billTo.contactPerson",
+                  { $ifNull: ["$billTo.companyName", ""] },
+                ],
+              },
+              customerPhone: { $ifNull: ["$billTo.contactNumber", ""] },
+              invoiceTotal: { $literal: 0 },
+              owedToCustomer: "$balance",
+              owedByCustomer: { $literal: 0 },
+              // manual credit notes are extra value given back; return ones
+              // are already inside the invoice's partialRefundAmount
+              totalReturnedValue: {
+                $cond: [{ $eq: ["$type", "manual"] }, "$summary.totalAmount", 0],
+              },
+              invoiceDate: "$creditNoteDate",
+              invoiceId: "$creditNoteId",
+              invoiceNumber: "$creditNoteNumber",
+              sourceOrderId: "$creditNoteNumber",
+              sourceOrderType: { $literal: "credit_note" },
+              status: { $literal: "credit_note" },
+              refundStatus: "$status",
+              summary: { paidAmount: { $literal: 0 } },
+            },
+          },
+        ],
       },
     },
     {
@@ -3134,7 +3187,7 @@ export const getCustomerBalanceLedgerService = async (query) => {
         },
         customerPhone: { $last: "$customerPhone" },
         customerName: { $last: "$customerName" },
-        totalOrders: { $sum: 1 },
+        totalOrders: { $sum: { $cond: ["$isCreditNote", 0, 1] } },
         totalOrderValue: { $sum: "$invoiceTotal" },
         totalReturnedValue: { $sum: "$totalReturnedValue" },
         totalOwedToCustomer: { $sum: "$owedToCustomer" },

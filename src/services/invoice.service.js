@@ -304,6 +304,12 @@ import { getPagination } from "../helpers/pagination.helper.js";
 import { v6 as uuidv6 } from "uuid";
 import Employee from "../models/manage/employee.model.js";
 import ManualOrder from "../models/manually order/manualOrder.model.js";
+import {
+  createCreditNoteFromInvoiceService,
+  getCreditNotesService,
+  getOpenCreditNotesForPhone,
+  toCreditNoteListShape,
+} from "./creditNote.service.js";
 
 const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
   const date = new Date(invoiceDate);
@@ -648,6 +654,33 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
 
   await invoice.save();
 
+  /* ---------- CREDIT NOTE DOCUMENT (store credit only) ----------
+     Settling as "credit_note" now creates a real CreditNote in its own
+     collection (numbered CN/2026-27/00001), exactly like an order creates
+     an Invoice. If it was spent straight away on a new order/invoice
+     (appliedToOrderId), it is created already "used"; otherwise it stays
+     "open" with a balance and shows up in "Check credit". */
+  let creditNote = null;
+  if (method === "credit_note") {
+    creditNote = await createCreditNoteFromInvoiceService({
+      invoice,
+      amount: settleAmount,
+      refundId,
+      employeeEmail: employee.email,
+      appliedToOrderId,
+      notes,
+    });
+    const entry = invoice.refundHistory.find((r) => r.refundId === refundId);
+    if (entry) {
+      entry.creditNoteId = creditNote.creditNoteId;
+      entry.creditNoteNumber = creditNote.creditNoteNumber;
+    }
+    if (!invoice.creditNoteIds.includes(creditNote.creditNoteId)) {
+      invoice.creditNoteIds.push(creditNote.creditNoteId);
+    }
+    await invoice.save();
+  }
+
   /* ---------- KEEP SOURCE ORDER IN SYNC (non-blocking) ---------- */
   try {
     await syncRefundStateToSourceOrder(invoice);
@@ -670,8 +703,10 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
   let appliedOrderItems = [];
   let appliedInvoiceNumber = null;
   if (appliedToOrderId) {
+    // appliedToOrderId is a new order's id (→ its invoice's sourceOrderId)
+    // OR a new standalone invoice's own invoiceId — match both.
     const appliedInvoice = await Invoice.findOne({
-      sourceOrderId: appliedToOrderId,
+      $or: [{ sourceOrderId: appliedToOrderId }, { invoiceId: appliedToOrderId }],
       isDeleted: false,
     }).lean();
     if (appliedInvoice) {
@@ -683,7 +718,13 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
   }
 
   return {
-    refundId,
+    // Full CreditNote (list/PDF shape) when one was created — spread first
+    // so the settlement fields below keep their meaning.
+    ...(creditNote ? toCreditNoteListShape(creditNote.toObject()) : {}),
+    refundId: creditNote ? creditNote.creditNoteNumber : refundId,
+    invoiceRefundId: refundId,
+    creditNoteId: creditNote?.creditNoteId || null,
+    creditNoteNumber: creditNote?.creditNoteNumber || null,
     invoiceId: invoice.invoiceId,
     invoiceNumber: invoice.invoiceNumber,
     sourceInvoiceNumber: invoice.invoiceNumber,
@@ -714,7 +755,7 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
     // credit note issued straight from the Invoice pages. The manual-order
     // "Settle" flow (SettleRefundModal) builds a proper returnedItems list
     // itself from the order's own returnRequests, which is more accurate.
-    returnedItems: invoice.items,
+    returnedItems: creditNote ? toCreditNoteListShape(creditNote.toObject()).items : invoice.items,
   };
 };
 
@@ -724,121 +765,10 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
    regardless of whether that invoice came from a manual order or an
    ecommerce order.
    ========================================================================= */
-export const getInvoiceCreditNotesService = async (query) => {
-  const { search, startDate, endDate } = query;
-
-  const refundMatch = { "refundHistory.method": "credit_note" };
-  if (startDate || endDate) {
-    refundMatch["refundHistory.refundedAt"] = {};
-    if (startDate) {
-      const from = new Date(startDate);
-      if (!Number.isNaN(from.getTime())) refundMatch["refundHistory.refundedAt"].$gte = from;
-    }
-    if (endDate) {
-      const to = new Date(endDate);
-      if (!Number.isNaN(to.getTime())) {
-        to.setHours(23, 59, 59, 999);
-        refundMatch["refundHistory.refundedAt"].$lte = to;
-      }
-    }
-  }
-
-  const pipeline = [
-    { $match: { isDeleted: false } },
-    { $unwind: "$refundHistory" },
-    { $match: refundMatch },
-    {
-      $project: {
-        _id: 0,
-        refundId: "$refundHistory.refundId",
-        amount: "$refundHistory.amount",
-        refundedBy: "$refundHistory.refundedBy",
-        refundedAt: "$refundHistory.refundedAt",
-        refundStatus: "$refundHistory.refundStatus",
-        appliedToOrderId: "$refundHistory.appliedToOrderId",
-        notes: "$refundHistory.notes",
-        sourceInvoiceId: "$invoiceId",
-        sourceInvoiceNumber: "$invoiceNumber",
-        sourceOrderId: "$sourceOrderId",
-        sourceOrderType: "$sourceOrderType",
-        sourceOrderGrandTotal: "$summary.totalPayAmount",
-        customerName: "$billTo.contactPerson",
-        customerCompany: "$billTo.companyName",
-        customerPhone: "$billTo.contactNumber",
-        items: "$items",
-      },
-    },
-    // The order/invoice this credit was actually spent on. appliedToOrderId
-    // is either a manual/ecommerce order's own id (matched via that order's
-    // invoice's sourceOrderId) or, when the credit was applied straight onto
-    // a NEW STANDALONE invoice (no order behind it), that invoice's own
-    // invoiceId directly — so both cases resolve to real invoice details
-    // instead of a bare, contextless id.
-    {
-      $lookup: {
-        from: Invoice.collection.name,
-        let: { appliedId: "$appliedToOrderId" },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $ne: ["$$appliedId", null] },
-                  { $or: [{ $eq: ["$sourceOrderId", "$$appliedId"] }, { $eq: ["$invoiceId", "$$appliedId"] }] },
-                ],
-              },
-            },
-          },
-          { $limit: 1 },
-        ],
-        as: "_appliedInvoice",
-      },
-    },
-    { $unwind: { path: "$_appliedInvoice", preserveNullAndEmptyArrays: true } },
-    {
-      $addFields: {
-        appliedInvoiceNumber: "$_appliedInvoice.invoiceNumber",
-        appliedOrderDate: "$_appliedInvoice.orderDate",
-        appliedOrderGrandTotal: "$_appliedInvoice.summary.totalPayAmount",
-      },
-    },
-    { $project: { _appliedInvoice: 0 } },
-    { $sort: { refundedAt: -1 } },
-  ];
-
-  if (search && search.trim()) {
-    const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    pipeline.push({
-      $match: {
-        $or: [
-          { customerName: regex },
-          { customerCompany: regex },
-          { customerPhone: regex },
-          { sourceOrderId: regex },
-          { sourceInvoiceNumber: regex },
-          { refundId: regex },
-        ],
-      },
-    });
-  }
-
-  const creditNotes = await Invoice.aggregate(pipeline);
-
-  const totalIssued = creditNotes.reduce((sum, c) => sum + Number(c.amount || 0), 0);
-  const totalApplied = creditNotes
-    .filter((c) => c.appliedToOrderId)
-    .reduce((sum, c) => sum + Number(c.amount || 0), 0);
-
-  return {
-    creditNotes,
-    summary: {
-      totalCreditNotes: creditNotes.length,
-      totalIssued,
-      totalApplied,
-      totalUnapplied: Math.max(totalIssued - totalApplied, 0),
-    },
-  };
-};
+// Kept for backward compatibility with GET /invoice/manage/credit-notes —
+// credit notes now live in their own collection, so this just delegates.
+// New code should call GET /credit-note/manage/get/:permission instead.
+export const getInvoiceCreditNotesService = async (query) => getCreditNotesService(query);
 
 /* =========================================================================
    "CHECK CREDIT" LOOKUP — every invoice (manual-order, ecommerce, or
@@ -874,6 +804,7 @@ export const getCustomerCreditLookupService = async ({ phone }) => {
     .lean();
 
   const sources = invoices.map((inv) => ({
+    kind: "invoice", // settle via PUT /invoice/manage/credit-settle/:invoiceId
     invoiceId: inv.invoiceId,
     invoiceNumber: inv.invoiceNumber,
     sourceOrderId: inv.sourceOrderId,
@@ -884,7 +815,27 @@ export const getCustomerCreditLookupService = async ({ phone }) => {
     owed: Number(inv.refundableAmount || 0),
   }));
 
-  const available = sources.reduce((sum, s) => sum + s.owed, 0);
+  // NEW — open credit notes (manual ones, and return credit notes that were
+  // issued as store credit but not spent yet). Use via
+  // PUT /credit-note/manage/apply/:creditNoteId.
+  const openNotes = await getOpenCreditNotesForPhone(trimmed);
+  for (const cn of openNotes) {
+    sources.push({
+      kind: "credit_note",
+      creditNoteId: cn.creditNoteId,
+      creditNoteNumber: cn.creditNoteNumber,
+      invoiceId: cn.invoiceId,
+      invoiceNumber: cn.creditNoteNumber, // shown in the UI list
+      sourceOrderId: cn.sourceOrderId,
+      sourceOrderType: cn.sourceOrderType,
+      orderDate: cn.creditNoteDate,
+      companyName: cn.billTo?.companyName,
+      contactPerson: cn.billTo?.contactPerson,
+      owed: Number(cn.balance || 0),
+    });
+  }
+
+  const available = Math.round(sources.reduce((sum, s) => sum + s.owed, 0) * 100) / 100;
 
   return { available, sources };
 };
