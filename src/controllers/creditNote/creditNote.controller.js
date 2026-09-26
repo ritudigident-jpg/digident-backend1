@@ -5,6 +5,8 @@ import {
   applyCreditNoteService,
   refundCreditNoteService,
   cancelCreditNoteService,
+  getApplyTargetsService,
+  applyCreditNoteToInvoiceService,
 } from "../../services/creditNote.service.js";
 import { settleInvoiceRefundService } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
@@ -187,6 +189,44 @@ export const cancelCreditNote = async (req, res) => {
     );
     await audit(req, data.creditNoteNumber, "credit_note.manage.cancel", "Delete");
     return sendSuccess(res, data, 200, "Credit note cancelled");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function getApplyTargets
+ * @route GET /api/v1/credit-note/manage/apply-targets/:creditNoteId/:permission
+ * @description This customer's invoices (same phone) that still have an
+ * amount due — the list shown in the credit note's "Use on an invoice" step.
+ */
+export const getApplyTargets = async (req, res) => {
+  try {
+    const data = await getApplyTargetsService({ creditNoteId: req.params.creditNoteId });
+    return sendSuccess(res, data, 200, "Invoices fetched successfully");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * @function applyCreditNoteToInvoice
+ * @route PUT /api/v1/credit-note/manage/apply-to-invoice/:creditNoteId
+ * body: { invoiceId, amount? }  — amount defaults to min(balance, amount due)
+ * The credit counts as payment on that invoice (its amount due goes down).
+ */
+export const applyCreditNoteToInvoice = async (req, res) => {
+  try {
+    const { invoiceId, amount } = req.body;
+    if (!invoiceId) {
+      return sendError(res, { message: "invoiceId is required", statusCode: 400, errorCode: "VALIDATION_ERROR" });
+    }
+    const data = await applyCreditNoteToInvoiceService(
+      { creditNoteId: req.params.creditNoteId, invoiceId, amount },
+      req.user
+    );
+    await audit(req, `${data.creditNote.creditNoteNumber} → ${data.invoice.invoiceNumber}`, "credit_note.manage.apply", "Update");
+    return sendSuccess(res, data, 200, "Credit applied to invoice");
   } catch (error) {
     return handleError(res, error);
   }

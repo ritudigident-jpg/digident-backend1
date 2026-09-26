@@ -59,6 +59,9 @@ const creditNoteUsageSchema = new Schema(
     appliedToType: { type: String, enum: ["manual_order", "ecommerce_order", "invoice", null], default: null },
     appliedToId: { type: String, default: null }, // orderId or invoiceId
     appliedToNumber: { type: String, default: null }, // human-readable invoice number
+    // true = applied to an EXISTING invoice and counted as payment on it
+    // (its amount due went down). false = discount on a brand-new order/invoice.
+    paidExistingInvoice: { type: Boolean, default: false },
 
     // kind "refunded" — how it was paid back
     method: { type: String, enum: ["cash", "upi", "bank_transfer", "card", "other", null], default: null },

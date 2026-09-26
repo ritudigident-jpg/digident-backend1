@@ -605,3 +605,119 @@ export const getOpenCreditNotesForPhone = async (phone) =>
   })
     .sort({ creditNoteDate: 1 })
     .lean();
+
+/* =============================================================================
+   6) APPLY TO AN EXISTING INVOICE  (one-screen flow from the credit note)
+   Staff open a credit note, see this customer's invoices that still have an
+   amount due, pick one and apply. The credit is treated as a PAYMENT on that
+   invoice: summary.paidAmount goes up, so amountToPay goes down and status
+   becomes "partially_paid" / "paid". Ecommerce invoices are excluded (paid
+   online). Manual-order invoices are fine — resyncInvoiceForOrder adds
+   invoice.appliedCredits back whenever it recomputes paidAmount.
+   ============================================================================= */
+const amountDue = (inv) => Math.max(round2(inv.summary?.amountToPay || 0), 0);
+
+export const getApplyTargetsService = async ({ creditNoteId }) => {
+  const cn = await CreditNote.findOne({ creditNoteId, isDeleted: false }).lean();
+  if (!cn) throw fail("Credit note not found", 404, "CREDIT_NOTE_NOT_FOUND");
+
+  const phone = String(cn.billTo?.contactNumber || "").trim();
+  if (!phone) return { creditNote: toCreditNoteListShape(cn), invoices: [] };
+
+  const invoices = await Invoice.find({
+    isDeleted: false,
+    "billTo.contactNumber": phone,
+    status: { $in: ["issued", "partially_paid"] },
+    sourceOrderType: { $ne: "ecommerce" },
+    "summary.amountToPay": { $gt: 0 },
+  })
+    .sort({ invoiceDate: -1 })
+    .select("invoiceId invoiceNumber invoiceDate status sourceOrderId sourceOrderType summary billTo")
+    .lean();
+
+  return {
+    creditNote: toCreditNoteListShape(cn),
+    invoices: invoices.map((inv) => ({
+      invoiceId: inv.invoiceId,
+      invoiceNumber: inv.invoiceNumber,
+      invoiceDate: inv.invoiceDate,
+      status: inv.status,
+      sourceOrderType: inv.sourceOrderType,
+      customerName: inv.billTo?.contactPerson || inv.billTo?.companyName,
+      total: round2(inv.summary?.totalPayAmount || 0),
+      paid: round2(inv.summary?.paidAmount || 0),
+      due: amountDue(inv),
+    })),
+  };
+};
+
+export const applyCreditNoteToInvoiceService = async ({ creditNoteId, invoiceId, amount }, currentUser) => {
+  const employee = await getEmployee(currentUser);
+
+  const cn = await CreditNote.findOne({ creditNoteId, isDeleted: false });
+  if (!cn) throw fail("Credit note not found", 404, "CREDIT_NOTE_NOT_FOUND");
+  if (!["open", "partially_used"].includes(cn.status)) {
+    throw fail(`Credit note ${cn.creditNoteNumber} is "${cn.status}" — nothing left to use`);
+  }
+
+  const invoice = await Invoice.findOne({ invoiceId, isDeleted: false });
+  if (!invoice) throw fail("Invoice not found", 404, "INVOICE_NOT_FOUND");
+  if (invoice.sourceOrderType === "ecommerce") {
+    throw fail("Credit can't be applied to an ecommerce invoice", 400, "ECOMMERCE_INVOICE");
+  }
+  if (!["issued", "partially_paid"].includes(invoice.status)) {
+    throw fail(`Invoice ${invoice.invoiceNumber} is "${invoice.status}" — nothing left to pay on it`, 400, "INVOICE_NOT_DUE");
+  }
+
+  const due = amountDue(invoice);
+  const value = round2(amount ?? Math.min(cn.balance, due));
+  if (!value || value <= 0) throw fail("amount must be a positive number");
+  if (value > cn.balance + 0.01) {
+    throw fail(`Only ${cn.balance.toFixed(2)} is left on ${cn.creditNoteNumber}`, 400, "CREDIT_EXCEEDS_BALANCE");
+  }
+  if (value > due + 0.01) {
+    throw fail(`Invoice ${invoice.invoiceNumber} only has ${due.toFixed(2)} left to pay`, 400, "CREDIT_EXCEEDS_DUE");
+  }
+
+  // 1) credit note: record the usage (balance/status recalculated on save)
+  const usage = {
+    kind: "applied",
+    amount: value,
+    appliedToType: "invoice",
+    appliedToId: invoice.invoiceId,
+    appliedToNumber: invoice.invoiceNumber,
+    paidExistingInvoice: true,
+    notes: `Paid towards invoice ${invoice.invoiceNumber}`,
+    by: employee.email,
+    at: new Date(),
+  };
+  cn.usage.push(usage);
+  await cn.save();
+  const usageId = cn.usage[cn.usage.length - 1].usageId;
+
+  // 2) invoice: counts as payment
+  invoice.summary.paidAmount = round2(Number(invoice.summary?.paidAmount || 0) + value);
+  invoice.appliedCredits.push({
+    creditNoteId: cn.creditNoteId,
+    creditNoteNumber: cn.creditNoteNumber,
+    usageId,
+    amount: value,
+    appliedBy: employee.email,
+    appliedAt: new Date(),
+  });
+  await invoice.save(); // pre-save recomputes amountToPay
+  invoice.status = Number(invoice.summary.amountToPay) <= 0.01 ? "paid" : "partially_paid";
+  await invoice.save();
+
+  return {
+    creditNote: toCreditNoteListShape(cn.toObject()),
+    invoice: {
+      invoiceId: invoice.invoiceId,
+      invoiceNumber: invoice.invoiceNumber,
+      status: invoice.status,
+      paid: invoice.summary.paidAmount,
+      due: amountDue(invoice),
+    },
+    applied: value,
+  };
+};

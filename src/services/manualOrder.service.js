@@ -1807,6 +1807,7 @@
 //   };
 // };
 
+
 import mongoose from "mongoose";
 import { v6 as uuidv6 } from "uuid";
 import Employee from "../models/manage/employee.model.js";
@@ -1945,7 +1946,18 @@ const resyncInvoiceForOrder = async (order) => {
   const wasEverPaid = Boolean(order.paidAt);
   const grossPaid = wasEverPaid ? Number(order.grandTotal || 0) : 0;
   const refunded = Number(order.partialRefundAmount || 0) + Number(order.refundAmount || 0);
-  const netPaid = Math.max(grossPaid - refunded, 0);
+  // Credit notes applied straight onto this order's invoice count as
+  // payment too (see creditNote.service.js -> applyCreditNoteToInvoiceService)
+  // — add them back so this recompute doesn't wipe them out.
+  const invForCredits = await Invoice.findOne({ invoiceId: order.invoiceId }).select("appliedCredits").lean();
+  const creditsPaid = (invForCredits?.appliedCredits || []).reduce((s, c) => s + Number(c.amount || 0), 0);
+  // Capped at what the order is worth (after refunds): if staff later mark
+  // the order "paid" in full, a credit already applied must not push the
+  // invoice into over-payment.
+  const netPaid = Math.min(
+    Math.max(grossPaid - refunded, 0) + creditsPaid,
+    Math.max(Number(order.grandTotal || 0) - refunded, 0)
+  );
 
   // A cancelled order's items don't have returnedQuantity touched (unlike
   // an actual return), so buildInvoiceItemsFromOrder would still see them
