@@ -297,7 +297,6 @@
 // };
 
 
-
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -311,6 +310,7 @@ import {
   getOpenCreditNotesForPhone,
   toCreditNoteListShape,
 } from "./creditNote.service.js";
+import { syncCustomerFromInvoice } from "../helpers/linkedSync.helper.js";
 
 const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
   const date = new Date(invoiceDate);
@@ -321,48 +321,32 @@ const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
   return date;
 };
 
-export const generateCustomerNo = async ({
-  customerNo,
-  contactPerson,
-}) => {
-
-  // CASE 1
-  // customerNo already sent from frontend
-
+export const generateCustomerNo = async ({ customerNo, contactPerson }) => {
+  // CASE 1 — customerNo already sent from frontend
   if (customerNo) {
     return customerNo;
   }
 
-  // CASE 2
-  // find existing customer by contactPerson
-
+  // CASE 2 — find existing customer by contactPerson
   const existingCustomer = await Invoice.findOne({
     isDeleted: false,
-
     "billTo.contactPerson": {
-      $regex: new RegExp(
-        `^${contactPerson.trim()}$`,
-        "i"
-      ),
+      $regex: new RegExp(`^${contactPerson.trim()}$`, "i"),
     },
   }).sort({ createdAt: 1 });
-
-  // Existing customer found
 
   if (existingCustomer) {
     return existingCustomer.customerNo;
   }
 
-  // CASE 3
-  // generate next customer number
-
+  // CASE 3 — generate next customer number
   const lastCustomer = await Invoice.findOne({})
     .sort({ customerNo: -1 })
     .select("customerNo");
 
-  return lastCustomer
-    ? lastCustomer.customerNo + 1 : 1; 
+  return lastCustomer ? lastCustomer.customerNo + 1 : 1;
 };
+
 export const createInvoiceService = async (data) => {
   const numbers = await generateInvoiceNumbers();
   const invoiceDate = data.invoiceDate ? new Date(data.invoiceDate) : new Date();
@@ -412,7 +396,7 @@ export const createInvoiceService = async (data) => {
     },
     notes: data.notes || "",
     status: data.status || "issued",
-    // NEW — link back to whichever order created this invoice, so a
+    // link back to whichever order created this invoice, so a
     // refund settled here can be mirrored back onto that order.
     sourceOrderId: data.sourceOrderId || null,
     sourceOrderType: data.sourceOrderType || null,
@@ -421,13 +405,26 @@ export const createInvoiceService = async (data) => {
   return invoice;
 };
 
-export const updateInvoiceService = async ({ invoiceId, data }) => {
+/**
+ * source: "api"        -> normal edit from UI/controller
+ *         "order-sync" -> called by resyncInvoiceForOrder (manualOrder.service.js)
+ */
+export const updateInvoiceService = async ({ invoiceId, data, source = "api" }) => {
   const invoice = await Invoice.findOne({ invoiceId, isDeleted: false });
 
   if (!invoice) {
     const error = new Error("Invoice not found");
     error.statusCode = 404;
     error.errorCode = "INVOICE_NOT_FOUND";
+    throw error;
+  }
+
+  // Manual/ecommerce order invoice ke items sirf order se badlenge,
+  // warna agla resync UI ka edit overwrite kar dega.
+  if (data.items && invoice.sourceOrderId && source !== "order-sync") {
+    const error = new Error("Is invoice ke items order se aate hain — order mein edit karo");
+    error.statusCode = 400;
+    error.errorCode = "ITEMS_MANAGED_BY_ORDER";
     throw error;
   }
 
@@ -441,16 +438,24 @@ export const updateInvoiceService = async ({ invoiceId, data }) => {
     invoice.bankDetails = { ...invoice.bankDetails.toObject?.(), ...data.bankDetails };
   }
   if (data.items) {
-    invoice.items = data.items.map((item, index) => ({
-      articleNo: item.articleNo || String(index + 1),
-      description: item.description,
-      qty: item.qty,
-      price: item.price,
-      discountPercent: item.discountPercent || 0,
-      discountValue: item.discountValue || 0,
-      gstType: item.gstType || "IGST",
-      gstPercent: item.gstPercent || 0,
-    }));
+    // itemId, returnedQty, hsnCode preserve karo, warna return/credit note ka link toot jata hai
+    const oldItems = invoice.items.map((i) => (i.toObject ? i.toObject() : i));
+    invoice.items = data.items.map((item, index) => {
+      const old = oldItems.find((i) => item.itemId && i.itemId === item.itemId);
+      return {
+        itemId: item.itemId || old?.itemId,
+        returnedQty: old?.returnedQty || 0,
+        articleNo: item.articleNo || String(index + 1),
+        hsnCode: item.hsnCode || old?.hsnCode || "90212900",
+        description: item.description,
+        qty: item.qty,
+        price: item.price,
+        discountPercent: item.discountPercent || 0,
+        discountValue: item.discountValue || 0,
+        gstType: item.gstType || "IGST",
+        gstPercent: item.gstPercent ?? 5,
+      };
+    });
   }
   if (data.summary) {
     invoice.summary = { ...invoice.summary.toObject?.(), ...data.summary };
@@ -460,7 +465,7 @@ export const updateInvoiceService = async ({ invoiceId, data }) => {
     "invoiceDate", "dueDate", "orderDate", "deliveryDate",
     "paymentTerms", "termsOfDelivery", "shippingCondition",
     "customerServiceRep", "notes", "status",
-    // NEW — lets an order (manual/ecommerce) report "this much is owed
+    // lets an order (manual/ecommerce) report "this much is owed
     // back to the customer" without touching refundHistory itself.
     "refundStatus", "refundableAmount", "partialRefundAmount", "refundedAt",
   ];
@@ -472,10 +477,20 @@ export const updateInvoiceService = async ({ invoiceId, data }) => {
   }
 
   await invoice.save();
+
+  // Customer details badle to CreditNotes + source ManualOrder mein bhi pahunchao
+  if (data.billTo) {
+    try {
+      await syncCustomerFromInvoice(invoice);
+    } catch (e) {
+      console.error("Customer sync failed:", e.message);
+    }
+  }
+
   return invoice;
 };
 
-export const deleteInvoiceService = async ({ invoiceId }) => { /* unchanged */ 
+export const deleteInvoiceService = async ({ invoiceId }) => {
   const invoice = await Invoice.findOne({ invoiceId, isDeleted: false });
   if (!invoice) {
     const error = new Error("Invoice not found");
@@ -483,12 +498,21 @@ export const deleteInvoiceService = async ({ invoiceId }) => { /* unchanged */
     error.errorCode = "INVOICE_NOT_FOUND";
     throw error;
   }
+
+  // Credit notes linked hain to delete nahi hone dena
+  if ((invoice.creditNoteIds || []).length || (invoice.appliedCredits || []).length) {
+    const error = new Error("Is invoice par credit notes linked hain, delete nahi ho sakta");
+    error.statusCode = 400;
+    error.errorCode = "INVOICE_HAS_CREDIT_NOTES";
+    throw error;
+  }
+
   invoice.isDeleted = true;
   await invoice.save();
   return invoice;
 };
 
-export const getInvoiceByIdService = async ({ invoiceId }) => { /* unchanged */
+export const getInvoiceByIdService = async ({ invoiceId }) => {
   const invoice = await Invoice.findOne({ invoiceId, isDeleted: false }).lean();
   if (!invoice) {
     const error = new Error("Invoice not found");
@@ -499,7 +523,7 @@ export const getInvoiceByIdService = async ({ invoiceId }) => { /* unchanged */
   return invoice;
 };
 
-export const getInvoicesService = async ({ query }) => { /* unchanged, same as your original */
+export const getInvoicesService = async ({ query }) => {
   const { page, limit, skip } = getPagination(query);
   const { search, status, month, year } = query;
   const filter = { isDeleted: false };
@@ -533,7 +557,8 @@ export const getInvoicesService = async ({ query }) => { /* unchanged, same as y
   return {
     invoices,
     pagination: {
-      totalItems, totalPages,
+      totalItems,
+      totalPages,
       currentPage: page,
       nextPage: page < totalPages ? page + 1 : null,
       prevPage: page > 1 ? page - 1 : null,
@@ -545,9 +570,7 @@ export const getInvoicesService = async ({ query }) => { /* unchanged, same as y
 /* =========================================================================
    MIRROR A SETTLED REFUND BACK TO THE ORDER IT CAME FROM
    Purely a display-sync — this invoice is the source of truth for the
-   money; the order just needs to keep showing the same numbers it always
-   has (paymentStatus, partialRefundAmount, refundHistory) so nothing else
-   in the app that reads the order breaks.
+   money; the order just needs to keep showing the same numbers.
    ========================================================================= */
 const syncRefundStateToSourceOrder = async (invoice) => {
   if (!invoice.sourceOrderId || invoice.sourceOrderType !== "manual") return; // only manual orders wired up for now
@@ -578,14 +601,10 @@ const syncRefundStateToSourceOrder = async (invoice) => {
 };
 
 /* =========================================================================
-   SETTLE A PENDING REFUND (cash payout OR store credit) — moved here from
-   manualOrder.service.js. Works off invoice.refundableAmount, which any
-   order type sets via updateInvoiceService whenever it creates/changes a
-   pending refund (return, cancellation, ...). This is the ONLY function
-   that decrements it and writes refundHistory.
+   SETTLE A PENDING REFUND (cash payout OR store credit)
+   Works off invoice.refundableAmount. This is the ONLY function that
+   decrements it and writes refundHistory.
    ========================================================================= */
-// services/invoice.service.js — sirf settleInvoiceRefundService ka return block change karo
-
 export const settleInvoiceRefundService = async (data, currentUser) => {
   const { invoiceId, amount, method = "credit_note", reference, appliedToOrderId, notes } = data;
 
@@ -655,12 +674,7 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
 
   await invoice.save();
 
-  /* ---------- CREDIT NOTE DOCUMENT (store credit only) ----------
-     Settling as "credit_note" now creates a real CreditNote in its own
-     collection (numbered CN/2026-27/00001), exactly like an order creates
-     an Invoice. If it was spent straight away on a new order/invoice
-     (appliedToOrderId), it is created already "used"; otherwise it stays
-     "open" with a balance and shows up in "Check credit". */
+  /* ---------- CREDIT NOTE DOCUMENT (store credit only) ---------- */
   let creditNote = null;
   if (method === "credit_note") {
     creditNote = await createCreditNoteFromInvoiceService({
@@ -689,16 +703,11 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
     console.error("Order sync failed after invoice refund settle:", err.message);
   }
 
-  // Average GST% across this invoice's items — used only for the credit
-  // note PDF's tax breakdown when the frontend has no better source.
   const avgGstPercent =
     invoice.items.length > 0
       ? invoice.items.reduce((s, i) => s + Number(i.gstPercent || 0), 0) / invoice.items.length
       : 0;
 
-  // If this credit was applied straight onto a new manual order, pull that
-  // order's/invoice's details so the response (and any PDF built from it)
-  // has real context instead of a bare order ID.
   let appliedOrderDate = null;
   let appliedOrderGrandTotal = null;
   let appliedOrderItems = [];
@@ -719,8 +728,6 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
   }
 
   return {
-    // Full CreditNote (list/PDF shape) when one was created — spread first
-    // so the settlement fields below keep their meaning.
     ...(creditNote ? toCreditNoteListShape(creditNote.toObject()) : {}),
     refundId: creditNote ? creditNote.creditNoteNumber : refundId,
     invoiceRefundId: refundId,
@@ -750,38 +757,19 @@ export const settleInvoiceRefundService = async (data, currentUser) => {
     appliedOrderItems,
     remainingOwed: invoice.refundableAmount,
     sourceOrderGstPercentage: Math.round(avgGstPercent * 100) / 100,
-    // Best-effort: the invoice's current line items. On an invoice whose
-    // source order still exists, these are the items still active after
-    // the return (not literally "what was returned") — good enough for a
-    // credit note issued straight from the Invoice pages. The manual-order
-    // "Settle" flow (SettleRefundModal) builds a proper returnedItems list
-    // itself from the order's own returnRequests, which is more accurate.
     returnedItems: creditNote ? toCreditNoteListShape(creditNote.toObject()).items : invoice.items,
   };
 };
 
 /* =========================================================================
-   CREDIT NOTES LIST — moved here from manualOrder.service.js. Every
-   refundHistory entry across every invoice where method === "credit_note",
-   regardless of whether that invoice came from a manual order or an
-   ecommerce order.
+   CREDIT NOTES LIST — kept for backward compatibility with
+   GET /invoice/manage/credit-notes; delegates to the CreditNote collection.
    ========================================================================= */
-// Kept for backward compatibility with GET /invoice/manage/credit-notes —
-// credit notes now live in their own collection, so this just delegates.
-// New code should call GET /credit-note/manage/get/:permission instead.
 export const getInvoiceCreditNotesService = async (query) => getCreditNotesService(query);
 
 /* =========================================================================
-   "CHECK CREDIT" LOOKUP — every invoice (manual-order, ecommerce, or
-   standalone) that still owes this phone number money right now
-   (refundStatus is "refund_pending" or "partial_refunded", i.e. NOT yet
-   settled). This is the "Tarika A" flow: a return is left pending — never
-   settled on its own — until the customer's next order/invoice actually
-   exists, at which point the pending amount is applied AND settled in the
-   same step (see settleInvoiceRefundService's appliedToOrderId). Once an
-   invoice is settled (as cash or as an already-applied credit_note), its
-   refundStatus stops being "refund_pending"/"partial_refunded", so it
-   naturally drops out of this list — nothing to double-apply.
+   "CHECK CREDIT" LOOKUP — every invoice that still owes this phone number
+   money + open credit notes.
    ========================================================================= */
 export const getCustomerCreditLookupService = async ({ phone }) => {
   const trimmed = String(phone || "").trim();
@@ -816,9 +804,7 @@ export const getCustomerCreditLookupService = async ({ phone }) => {
     owed: Number(inv.refundableAmount || 0),
   }));
 
-  // NEW — open credit notes (manual ones, and return credit notes that were
-  // issued as store credit but not spent yet). Use via
-  // PUT /credit-note/manage/apply/:creditNoteId.
+  // open credit notes — use via PUT /credit-note/manage/apply/:creditNoteId
   const openNotes = await getOpenCreditNotesForPhone(trimmed);
   for (const cn of openNotes) {
     sources.push({
@@ -843,24 +829,7 @@ export const getCustomerCreditLookupService = async ({ phone }) => {
 
 /* =========================================================================
    RECORD A RETURN DIRECTLY ON A STANDALONE INVOICE
-   ("Create Invoice" flow — no manual order, no ecommerce order behind it,
-   customer called in and staff created the invoice by hand).
-
-   For a manual-order invoice, returns are recorded on the ManualOrder
-   (createManualReturnService) and mirrored onto the invoice automatically.
-   For an ecommerce invoice, returns go through the ecommerce return-request
-   flow (untouched — real Razorpay refunds). THIS function is only for an
-   invoice with sourceOrderId === null: it is itself the only record of the
-   order, so the return has to be recorded straight on it.
-
-   It reduces the returned line items' available quantity (item.returnedQty),
-   works out how much that's worth (GST-inclusive, after any discount, using
-   the item's own totalAmount/qty rate so it matches what the customer was
-   actually charged), and either:
-     - settles it immediately (refundNow: true) — pushes straight into
-       refundHistory, same shape settleInvoiceRefundService writes, or
-     - leaves it as a pending amount (refundableAmount) for the invoice's
-       "Settle" button (settleInvoiceRefundService) to pay down later.
+   (sourceOrderId === null only)
    ========================================================================= */
 const computeRefundStatus = (refundableAmount, partialRefundAmount) => {
   if (refundableAmount > 0.01) {
@@ -888,12 +857,6 @@ export const createInvoiceReturnService = async (data, currentUser) => {
     throw error;
   }
 
-  // This is the whole point of the guard: a manual-order invoice already
-  // gets its returns recorded on the order (createManualReturnService) and
-  // mirrored here automatically; an ecommerce invoice goes through the
-  // ecommerce return-request flow. Recording a return here too would double
-  // count the refund. Only a standalone ("Create Invoice") invoice has no
-  // other place a return can be recorded.
   if (invoice.sourceOrderId) {
     const error = new Error(
       invoice.sourceOrderType === "manual"
@@ -905,9 +868,6 @@ export const createInvoiceReturnService = async (data, currentUser) => {
     throw error;
   }
 
-  // NEW — a return refunds money the customer actually paid. On a "draft",
-  // "issued" (unpaid) or "cancelled" invoice nothing has been received yet,
-  // so there is nothing to give back. Only "paid" / "partially_paid" pass.
   if (!["paid", "partially_paid"].includes(invoice.status)) {
     const error = new Error(
       `Return not allowed — this invoice is "${invoice.status}" and no payment has been received yet, so there is nothing to refund.`
@@ -957,8 +917,7 @@ export const createInvoiceReturnService = async (data, currentUser) => {
     }
 
     // Per-unit rate from what the customer was actually charged for this
-    // line (totalAmount is GST-inclusive, post-discount), not the raw MRP —
-    // so a returned unit refunds exactly what it was sold for.
+    // line (GST-inclusive, post-discount), not the raw MRP.
     const perUnitAmount = Number(item.qty) > 0 ? Number(item.totalAmount) / Number(item.qty) : 0;
     const lineRefundAmount = Math.round(perUnitAmount * qty * 100) / 100;
 
@@ -974,11 +933,7 @@ export const createInvoiceReturnService = async (data, currentUser) => {
     });
   }
 
-  // NEW — never refund more than was actually collected. Matters mostly for
-  // "partially_paid": if the customer paid 1000 of 5400, total refunds
-  // (already settled + still pending + this return) can't go above 1000.
-  // A fully "paid" invoice counts as totalPayAmount paid even if
-  // summary.paidAmount was never filled in on older records.
+  // never refund more than was actually collected
   const totalPayable = Number(invoice.summary?.totalPayAmount || 0);
   const recordedPaid = Number(invoice.summary?.paidAmount || 0);
   const amountReceived =
@@ -1030,11 +985,8 @@ export const createInvoiceReturnService = async (data, currentUser) => {
       appliedToOrderId: null,
       notes: notes || null,
     });
-    // Settled immediately — this return's amount never touches refundableAmount.
     invoice.refundStatus = computeRefundStatus(Number(invoice.refundableAmount || 0), invoice.partialRefundAmount);
   } else {
-    // Left pending — the invoice's own "Settle" action (settleInvoiceRefundService)
-    // pays this down later, same as a manual-order return.
     invoice.refundableAmount = Number(invoice.refundableAmount || 0) + refundableAmountDelta;
     invoice.refundStatus = computeRefundStatus(invoice.refundableAmount, Number(invoice.partialRefundAmount || 0));
   }

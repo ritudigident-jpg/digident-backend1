@@ -3,7 +3,7 @@ import Invoice from "../models/manage/invoice.model.js";
 import Employee from "../models/manage/employee.model.js";
 import ManualOrder from "../models/manually order/manualOrder.model.js";
 import { getDefaultSellerDetails } from "../helpers/invoiceDefault.helper.js";
-
+import { syncPaymentToOrder, unlinkCreditNote } from "../helpers/linkedSync.helper.js";
 /* =============================================================================
    CREDIT NOTE SERVICE
    Mirrors invoice.service.js: one place that creates / reads / changes
@@ -409,6 +409,12 @@ export const applyCreditNoteService = async ({ creditNoteId, amount, appliedToId
     at: new Date(),
   });
   await cn.save();
+  if (cn.invoiceId) {
+  await Invoice.updateOne(
+    { invoiceId: cn.invoiceId, "refundHistory.creditNoteId": cn.creditNoteId },
+    { $set: { "refundHistory.$.appliedToOrderId": appliedToId } }
+  );
+}
   return toCreditNoteListShape(cn.toObject());
 };
 
@@ -465,6 +471,7 @@ export const cancelCreditNoteService = async ({ creditNoteId, reason }, currentU
   cn.cancelledAt = new Date();
   cn.cancelReason = String(reason || "").trim() || `Cancelled by ${employee.email}`;
   await cn.save();
+  await unlinkCreditNote(cn.invoiceId, cn.creditNoteId);
   return toCreditNoteListShape(cn.toObject());
 };
 
@@ -708,6 +715,7 @@ export const applyCreditNoteToInvoiceService = async ({ creditNoteId, invoiceId,
   await invoice.save(); // pre-save recomputes amountToPay
   invoice.status = Number(invoice.summary.amountToPay) <= 0.01 ? "paid" : "partially_paid";
   await invoice.save();
+  await syncPaymentToOrder(invoice);
 
   return {
     creditNote: toCreditNoteListShape(cn.toObject()),

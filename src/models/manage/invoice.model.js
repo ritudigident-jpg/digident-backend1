@@ -976,15 +976,18 @@ invoiceSchema.pre("save", function () {
     sumTax += gstAmount;
   }
 
-  const freightCost = Math.max(0, Number(this.summary.freightCost) || 0);
-  const paidAmount = Math.max(0, Number(this.summary.paidAmount) || 0);
+const freightCost = Math.max(0, Number(this.summary.freightCost) || 0);
 
-  this.summary.totalGrossValue = round2(sumGrossAmount);
-  this.summary.totalDiscount = round2(sumDiscount);
-  this.summary.totalNet = round2(sumNet);
-  this.summary.totalTax = round2(sumTax);
-  this.summary.totalPayAmount = round2(sumNet + sumTax + freightCost);
-  this.summary.amountToPay = round2(this.summary.totalPayAmount - paidAmount);
+this.summary.totalGrossValue = round2(sumGrossAmount);
+this.summary.totalDiscount = round2(sumDiscount);
+this.summary.totalNet = round2(sumNet);
+this.summary.totalTax = round2(sumTax);
+this.summary.totalPayAmount = round2(sumNet + sumTax + freightCost);
+
+// paidAmount kabhi totalPayAmount se zyada nahi, amountToPay kabhi negative nahi
+const paid = Math.max(Number(this.summary.paidAmount) || 0, 0);
+this.summary.paidAmount = Math.min(paid, this.summary.totalPayAmount);
+this.summary.amountToPay = Math.max(round2(this.summary.totalPayAmount - this.summary.paidAmount),0);
 });
 
 function round2(n) {

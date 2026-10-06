@@ -1932,52 +1932,31 @@ const generateInvoiceForOrder = async (order) => {
  * refundHistory) purely so anything still reading the order directly
  * keeps showing accurate numbers.
  */
-const resyncInvoiceForOrder = async (order) => {
-  if (!order.invoiceId) return null; // order predates invoicing
+export const resyncInvoiceForOrder = async (order) => {
+  if (!order.invoiceId) return null;
 
   const items = buildInvoiceItemsFromOrder(order);
 
-  // order.paymentStatus is transient — it becomes "refund_pending" etc.
-  // partway through a return/refund, which doesn't tell us whether the
-  // order was ever actually paid. order.paidAt is the stable signal: it's
-  // set the moment payment is received and only cleared if payment is
-  // explicitly reverted to "pending", so it survives every state the order
-  // passes through afterward (returned, refund_pending, refunded, ...).
   const wasEverPaid = Boolean(order.paidAt);
   const grossPaid = wasEverPaid ? Number(order.grandTotal || 0) : 0;
-  const refunded = Number(order.partialRefundAmount || 0) + Number(order.refundAmount || 0);
-  // Credit notes applied straight onto this order's invoice count as
-  // payment too (see creditNote.service.js -> applyCreditNoteToInvoiceService)
-  // — add them back so this recompute doesn't wipe them out.
-  const invForCredits = await Invoice.findOne({ invoiceId: order.invoiceId }).select("appliedCredits").lean();
-  const creditsPaid = (invForCredits?.appliedCredits || []).reduce((s, c) => s + Number(c.amount || 0), 0);
-  // Capped at what the order is worth (after refunds): if staff later mark
-  // the order "paid" in full, a credit already applied must not push the
-  // invoice into over-payment.
-  const netPaid = Math.min(
-    Math.max(grossPaid - refunded, 0) + creditsPaid,
-    Math.max(Number(order.grandTotal || 0) - refunded, 0)
-  );
 
-  // A cancelled order's items don't have returnedQuantity touched (unlike
-  // an actual return), so buildInvoiceItemsFromOrder would still see them
-  // as "active" — check orderStatus explicitly instead of relying on an
-  // empty item list to catch this case.
-  const status = order.orderStatus === "cancelled" || items.length === 0 ? "cancelled" : undefined;
-
-  /* ---------- REPORT REFUND STATE TO THE INVOICE ----------
-     How much is owed right now: for a cancelled order it's the full
-     grandTotal minus whatever's already been settled; for a return it's
-     the value of everything actually returned minus whatever's already
-     been settled. Only reported as "owed" while the order's own
-     paymentStatus is still in a pending-refund state — once the invoice
-     settles it down to "refunded", order.paymentStatus gets synced back
-     to "refunded" too, at which point this naturally reports 0. */
+  // customer ko wapas milne wali value (settled + pending dono)
   const totalReturnedValue = (order.returnRequests || []).reduce(
     (sum, rr) => sum + (rr.items || []).reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0),
     0
   );
   const owedBasis = order.orderStatus === "cancelled" ? Number(order.refundAmount || 0) : totalReturnedValue;
+  const refundCommitted = wasEverPaid
+    ? Math.max(owedBasis, Number(order.partialRefundAmount || 0))
+    : 0;
+
+  const invForCredits = await Invoice.findOne({ invoiceId: order.invoiceId }).select("appliedCredits").lean();
+  const creditsPaid = (invForCredits?.appliedCredits || []).reduce((s, c) => s + Number(c.amount || 0), 0);
+
+  const netPaid = Math.max(grossPaid - refundCommitted, 0) + creditsPaid; // cap invoice model hook karega
+
+  const status = order.orderStatus === "cancelled" || items.length === 0 ? "cancelled" : undefined;
+
   const refundableAmount = ["refund_pending", "partial_refunded"].includes(order.paymentStatus)
     ? Math.max(owedBasis - Number(order.partialRefundAmount || 0), 0)
     : 0;
@@ -1992,12 +1971,12 @@ const resyncInvoiceForOrder = async (order) => {
 
   const updated = await updateInvoiceService({
     invoiceId: order.invoiceId,
+    source: "order-sync",
     data: {
       items: items.length > 0 ? items : undefined,
       summary: { paidAmount: netPaid },
       ...(status ? { status } : {}),
       notes: `Synced with order ${order.orderId} on ${new Date().toLocaleDateString("en-IN")}`,
-      // Refund-state fields consumed by invoice.model.js / invoice.service.js.
       refundStatus,
       refundableAmount,
       partialRefundAmount: Number(order.partialRefundAmount || 0),
@@ -2005,14 +1984,14 @@ const resyncInvoiceForOrder = async (order) => {
     },
   });
 
-  // items.length === 0 has no valid items array to satisfy the invoice's
-  // own "min 1 item" validation on manual edits from the UI later, but the
-  // service layer itself doesn't enforce that on updateInvoiceService, so
-  // status "cancelled" with an empty items array is left as-is here.
   if (!status && updated) {
     const newStatus = Number(updated.summary?.amountToPay) <= 0 ? "paid" : "partially_paid";
     if (updated.status !== newStatus) {
-      await updateInvoiceService({ invoiceId: order.invoiceId, data: { status: newStatus } });
+      await updateInvoiceService({
+        invoiceId: order.invoiceId,
+        source: "order-sync",
+        data: { status: newStatus },
+      });
     }
   }
 
