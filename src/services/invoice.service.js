@@ -309,6 +309,7 @@ import {
   getCreditNotesService,
   getOpenCreditNotesForPhone,
   toCreditNoteListShape,
+  getInvoiceCreditCap,
 } from "./creditNote.service.js";
 import { syncCustomerFromInvoice } from "../helpers/linkedSync.helper.js";
 
@@ -933,18 +934,14 @@ export const createInvoiceReturnService = async (data, currentUser) => {
     });
   }
 
-  // never refund more than was actually collected
-  const totalPayable = Number(invoice.summary?.totalPayAmount || 0);
-  const recordedPaid = Number(invoice.summary?.paidAmount || 0);
-  const amountReceived =
-    invoice.status === "paid" ? Math.max(recordedPaid, totalPayable) : recordedPaid;
-  const alreadyCommitted =
-    Number(invoice.partialRefundAmount || 0) + Number(invoice.refundableAmount || 0);
-  const maxRefundable = Math.max(amountReceived - alreadyCommitted, 0);
+     // Cap mein manual credit notes bhi ginte hain, warna same paise ka
+  // credit note aur return dono ban jate hain
+  const maxRefundable = await getInvoiceCreditCap(invoice);
 
   if (refundableAmountDelta > maxRefundable + 0.01) {
     const error = new Error(
-      `Refund amount (${refundableAmountDelta.toFixed(2)}) is more than what the customer has actually paid and not yet been refunded (${maxRefundable.toFixed(2)}).`
+      `Refund amount (${refundableAmountDelta.toFixed(2)}) is more than what's left to give back on this invoice (${maxRefundable.toFixed(2)}). ` +
+      `Is invoice par pehle se credit note / refund ban chuka hai.`
     );
     error.statusCode = 400;
     error.errorCode = "REFUND_EXCEEDS_PAID";
