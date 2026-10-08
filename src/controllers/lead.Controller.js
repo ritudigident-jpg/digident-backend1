@@ -461,20 +461,107 @@ export const importExcel = asyncHandler(async (req, res) => {
 
 /* req.user only carries `email` — the JWT has no role claim — so we must
    resolve the real employee record from the DB to check the actual role. */
-const assertAdmin = async (req) => {
+const assertRole = async (req, allowedRoles, message) => {
   if (!req.user?.email) {
     const authErr = new Error("Not authenticated");
     authErr.statusCode = 401;
     throw authErr;
   }
   const employee = await asvc.resolveActingEmployee(req.user.email);
-  if (employee.role !== 0 && employee.role !== 1) {
-    const adminErr = new Error("Only Admin/Super Admin can perform this action");
-    adminErr.statusCode = 403;
-    throw adminErr;
+  if (!allowedRoles.includes(employee.role)) {
+    const roleErr = new Error(message);
+    roleErr.statusCode = 403;
+    throw roleErr;
   }
   return employee;
 };
+
+const assertAdmin = (req) =>
+  assertRole(req, [ROLES.SUPERADMIN, ROLES.ADMIN], "Only Admin/Super Admin can perform this action");
+
+/* ─ Direct Client Creation (Manager / Admin / Super Admin) ──────────────── */
+
+const CLIENT_CREATOR_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.MANAGER];
+const CLIENT_CREATOR_MESSAGE = "Only Manager/Admin/Super Admin can create clients";
+
+/**
+ * @function getClientOwners
+ *
+ * @route GET /api/leads/client-owners
+ *
+ * @description
+ * Options for the Create Client "Contact By" field:
+ * "Vithal Sir" (default) + active employees. "Other" is a free-text entry on the form.
+ *
+ * @response
+ * 200 { success: true, data: { defaultContactBy, employees } }
+ *
+ * @errors
+ * 401 - UNAUTHORIZED
+ * 403 - FORBIDDEN
+ */
+export const getClientOwners = asyncHandler(async (req, res) => {
+  await assertRole(req, CLIENT_CREATOR_ROLES, CLIENT_CREATOR_MESSAGE);
+  const data = await svc.getClientOwners();
+  ok(res, { data });
+});
+
+/**
+ * @function createClient
+ *
+ * @route POST /api/leads/create-client
+ *
+ * @description
+ * Create a client directly as a DentalLead with stage "client" and clientOrigin "direct".
+ *
+ * @body
+ * doctorName | clinicName (one required), contact (required),
+ * email, city, state, address, enquiry, remarks,
+ * contactByEmployeeId (existing employee) OR contactBy (custom "Other" name);
+ * neither → "Vithal Sir"
+ *
+ * @response
+ * 201 { success: true, data: Client }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 401 - UNAUTHORIZED
+ * 403 - FORBIDDEN
+ * 409 - CONTACT_ALREADY_EXISTS
+ */
+export const createClient = asyncHandler(async (req, res) => {
+  const actingEmployee = await assertRole(req, CLIENT_CREATOR_ROLES, CLIENT_CREATOR_MESSAGE);
+  const data = await svc.createClient(req.body, actingEmployee);
+  ok(res, { data }, 201);
+}, 400);
+
+/**
+ * @function linkInvoice
+ *
+ * @route PATCH /api/leads/:id/link-invoice
+ *
+ * @description
+ * Save the invoiceId of a newly created invoice on the client's DentalLead.
+ * Works for both converted and direct clients. Agents can only link their own clients.
+ *
+ * @body
+ * invoiceId (required)
+ *
+ * @response
+ * 200 { success: true, data: Client }
+ *
+ * @errors
+ * 400 - VALIDATION_ERROR
+ * 404 - CLIENT_NOT_FOUND / INVOICE_NOT_FOUND
+ */
+export const linkInvoice = asyncHandler(async (req, res) => {
+  let requestingUser = null;
+  if (req.user?.email) {
+    try { requestingUser = await asvc.resolveActingEmployee(req.user.email); } catch { requestingUser = null; }
+  }
+  const data = await svc.linkInvoice(req.params.id, req.body.invoiceId, requestingUser);
+  ok(res, { data });
+}, 400);
 
 export const distributeUnassigned = asyncHandler(async (req, res) => {
   // const actingEmployee = await assertAdmin(req);

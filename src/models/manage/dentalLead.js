@@ -261,6 +261,21 @@ const dentalLeadSchema = new mongoose.Schema(
       sparse: true,
     },
 
+    // How this record became a client:
+    //   "converted" → Inquiry ➔ Follow-up ➔ Client (convertToClient)
+    //   "direct"    → created manually as a client (createClient)
+    // Left unset for leads that are not clients yet.
+    clientOrigin: {
+      type: String,
+      enum: ["converted", "direct"],
+    },
+
+    // When a lead was converted into a client (convertToClient only).
+    convertedAt: {
+      type: Date,
+      default: null,
+    },
+
     /* ──────────────────────────────────────────────
        Lead Assignment (Ownership + Redistribution)
     ────────────────────────────────────────────── */
@@ -383,6 +398,16 @@ const dentalLeadSchema = new mongoose.Schema(
     },
   },
   { timestamps: true }
+);
+
+/* ────────────────────────────────────────────────────────────────
+   clientId must be unique across all client records.
+   Partial index: only documents that actually have a string clientId
+   are indexed, so the many leads with clientId = null don't collide.
+──────────────────────────────────────────────────────────────── */
+dentalLeadSchema.index(
+  { clientId: 1 },
+  { unique: true, partialFilterExpression: { clientId: { $type: "string" } } }
 );
 
 /* ────────────────────────────────────────────────────────────────

@@ -103,7 +103,8 @@ export const getLeadById = async (id) => {
 export const updateLead = async (id, data) => {
   const {
     stage, clientId, preSaleFollowups, postSaleFollowups,
-    ordersList, flagReason, flaggedAt, flaggedBy, ...safeData
+    ordersList, flagReason, flaggedAt, flaggedBy,
+    clientOrigin, convertedAt, ...safeData
   } = data;
 
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
@@ -212,15 +213,189 @@ export const logFollowUp = async (leadId, stageType, email, body) => {
   throw new Error("Invalid stage type");
 };
 
+/* ─── CLIENT ID — unique, never reused ──────────────────────────────────────
+   Next id = highest existing DIGI-DENT-### number + 1 (deleted and flagged
+   records included, so an id is never handed out twice). The unique index
+   on clientId in dentalLead.js catches two saves racing for the same
+   number; we then pick the next number and retry.
+─────────────────────────────────────────────────────────────────────────── */
+const CLIENT_ID_PATTERN = /^DIGI-DENT-\d+$/;
+
+const nextClientId = async () => {
+  const [last] = await DentalLead.aggregate([
+    { $match: { clientId: CLIENT_ID_PATTERN } },
+    { $project: { n: { $toInt: { $arrayElemAt: [{ $split: ["$clientId", "-"] }, 2] } } } },
+    { $sort: { n: -1 } },
+    { $limit: 1 },
+  ]);
+  return `DIGI-DENT-${String((last?.n || 0) + 1).padStart(3, "0")}`;
+};
+
+const saveWithUniqueClientId = async (lead, attempts = 5) => {
+  // A record that already had a client id (e.g. client ➔ flag ➔ client) keeps it.
+  if (lead.clientId && CLIENT_ID_PATTERN.test(lead.clientId)) return lead.save();
+
+  for (let i = 0; i < attempts; i++) {
+    lead.clientId = await nextClientId();
+    try {
+      return await lead.save();
+    } catch (err) {
+      if (err?.code === 11000 && err?.keyPattern?.clientId) continue;
+      throw err;
+    }
+  }
+  throw new Error("Could not generate a unique client ID. Please try again.");
+};
+
 /* ─── CONVERT FOLLOW-UP ➔ CLIENT ─────────────────────────────────────────── */
 export const convertToClient = async (id) => {
   const lead = await DentalLead.findById(id);
   if (!lead) throw new Error("Lead record not found");
   if (lead.stage === "client") throw new Error("This profile is already registered as a client");
 
-  const clientCount = await DentalLead.countDocuments({ stage: "client" });
   lead.stage = "client";
-  lead.clientId = `DIGI-DENT-${String(clientCount + 1).padStart(3, "0")}`;
+  lead.clientOrigin = "converted";
+  lead.convertedAt = new Date();
+  return saveWithUniqueClientId(lead);
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DIRECT CLIENT CREATION
+   Same DentalLead document and same client structure as a converted
+   client, so follow-ups, orders and the invoice flow work unchanged.
+═══════════════════════════════════════════════════════════════════════ */
+const DEFAULT_CONTACT_BY = "Vithal Sir";
+
+const DIRECT_CLIENT_FIELDS = [
+  "doctorName", "clinicName", "email", "contact",
+  "city", "state", "address", "enquiry", "remarks",
+];
+
+const activeEmployeeQuery = { isDeleted: false, isActive: { $ne: false } };
+
+const employeeName = (e) =>
+  (e ? `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.email || "" : "");
+
+const httpError = (message, statusCode) => {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+};
+
+/* ─── CONTACT BY OPTIONS — "Vithal Sir" default + active employees ──────── */
+export const getClientOwners = async () => {
+  const employees = await Employee.find(activeEmployeeQuery)
+    .select("_id employeeId firstName lastName email role")
+    .sort({ firstName: 1, lastName: 1 })
+    .lean();
+
+  return {
+    defaultContactBy: DEFAULT_CONTACT_BY,
+    employees: employees.map((e) => ({ ...e, name: employeeName(e) })),
+  };
+};
+
+/* ─── CREATE CLIENT (direct) ─────────────────────────────────────────────
+   Contact By:
+     contactByEmployeeId → that employee (name stored in contactBy, and the
+                           client is assigned to them)
+     contactBy (text)    → "Other": custom name stored as-is
+     neither             → "Vithal Sir"
+   When Contact By is not an employee, the client is assigned to the
+   manager creating it, so it is never left unassigned for auto-distribute.
+─────────────────────────────────────────────────────────────────────────── */
+export const createClient = async (data = {}, actingEmployee) => {
+  if (!actingEmployee?._id) throw httpError("Not authenticated", 401);
+
+  const fields = {};
+  for (const key of DIRECT_CLIENT_FIELDS) {
+    if (data[key] !== undefined && data[key] !== null) fields[key] = String(data[key]).trim();
+  }
+
+  // Same minimum as Excel import: a name (doctor or clinic) + contact.
+  if (!fields.doctorName && !fields.clinicName) throw httpError("Doctor name or clinic name is required", 400);
+  if (!fields.contact) throw httpError("Contact number is required", 400);
+
+  const existing = await DentalLead.findOne({ contact: fields.contact, ...baseQuery })
+    .select("_id stage clientId")
+    .lean();
+  if (existing) {
+    throw httpError(
+      existing.stage === "client"
+        ? `This contact is already a client (${existing.clientId || existing._id})`
+        : `A lead with this contact already exists in the "${existing.stage}" stage. Convert that lead instead.`,
+      409
+    );
+  }
+
+  let contactBy = DEFAULT_CONTACT_BY;
+  let contactEmployee = null;
+
+  if (data.contactByEmployeeId) {
+    if (!mongoose.Types.ObjectId.isValid(data.contactByEmployeeId)) {
+      throw httpError("Invalid Contact By employee", 400);
+    }
+    contactEmployee = await Employee.findOne({ _id: data.contactByEmployeeId, ...activeEmployeeQuery })
+      .select("_id firstName lastName email role")
+      .lean();
+    if (!contactEmployee) throw httpError("Selected Contact By employee is not an active employee", 400);
+    contactBy = employeeName(contactEmployee);
+  } else if (String(data.contactBy ?? "").trim()) {
+    contactBy = String(data.contactBy).trim();
+  }
+
+  const assignee = contactEmployee || actingEmployee;
+  const assigneeName = employeeName(assignee);
+  const now = new Date();
+
+  const lead = new DentalLead({
+    ...fields,
+    contactBy,
+    stage: "client",
+    clientOrigin: "direct",
+    source: "manual",
+    isTouched: true,
+
+    assignedEmployee: assignee._id,
+    assignedAgent: assigneeName,
+    assignedAt: now,
+    assignmentType: "manual",
+    assignmentHistory: [{
+      fromEmployee: null,
+      fromAgent: "",
+      toEmployee: assignee._id,
+      toAgent: assigneeName,
+      transferredBy: actingEmployee._id,
+      transferredByName: employeeName(actingEmployee),
+      reason: "Direct client creation",
+      transferredAt: now,
+    }],
+  });
+
+  return saveWithUniqueClientId(lead);
+};
+
+/* ─── LINK INVOICE — called after the existing invoice flow creates one ──── */
+export const linkInvoice = async (id, invoiceId, requestingUser = null) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) throw httpError("Invalid client id", 400);
+  if (!mongoose.Types.ObjectId.isValid(invoiceId)) throw httpError("A valid invoiceId is required", 400);
+
+  const query = { _id: id, stage: "client", ...baseQuery };
+  if (requestingUser && requestingUser.role === ROLES.AGENT) {
+    query.assignedEmployee = requestingUser._id;
+  }
+
+  const lead = await DentalLead.findOne(query);
+  if (!lead) throw httpError("Client not found", 404);
+
+  // Verify the invoice exists when the Invoice model is registered
+  // (DentalLead.invoiceId already refs "Invoice").
+  const Invoice = mongoose.models.Invoice;
+  if (Invoice && !(await Invoice.exists({ _id: invoiceId }))) {
+    throw httpError("Invoice not found", 404);
+  }
+
+  lead.invoiceId = invoiceId;
   return lead.save();
 };
 
@@ -485,4 +660,3 @@ export const getLeadsByAgent = async (employeeId, filters = {}) => {
     totalPages: Math.ceil(total / parseInt(limit)),
   };
 };
- 

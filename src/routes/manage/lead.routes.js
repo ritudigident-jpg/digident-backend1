@@ -11,6 +11,10 @@ router.get("/dashboard",  lc.getDashboard);
 router.get("/upcoming",   lc.getUpcomingFollowUps);
 router.post("/import-excel", uploadExcel.single("file"), lc.importExcel);
 
+// Direct client creation — must stay above "/:id"
+router.get("/client-owners",  lc.getClientOwners);
+router.post("/create-client", lc.createClient);
+
 router.get("/",    lc.getAllLeads);
 router.post("/",   lc.createLead);
 router.get("/:id", lc.getLeadById);
@@ -19,6 +23,7 @@ router.delete("/:id", lc.deleteLead);
 
 router.patch("/:id/move-to-followup",   lc.moveToFollowup);
 router.patch("/:id/convert-to-client",  lc.convertToClient);
+router.patch("/:id/link-invoice",       lc.linkInvoice);
 router.post("/:id/followup/:stageType", lc.logFollowUp);
 router.post("/:id/remark-followup", lc.logRemarkFollowUp);
 router.post("/:id/order", lc.logOrder);
