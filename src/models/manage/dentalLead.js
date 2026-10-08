@@ -190,6 +190,65 @@ const assignmentHistorySchema = new mongoose.Schema(
 );
 
 /* ────────────────────────────────────────────────────────────────
+   Client Invoices
+   One entry per invoice raised for this client, with the employee
+   (agent) who created it. Amount is the total at creation time;
+   live status/payment always comes from the Invoice itself.
+──────────────────────────────────────────────────────────────── */
+const clientInvoiceSchema = new mongoose.Schema(
+  {
+    invoice: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Invoice",
+      required: true,
+    },
+
+    // Invoice UUID — the id the /invoice/manage/... routes use
+    invoiceId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    invoiceNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    totalAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+    },
+
+    createdByName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    createdByEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "",
+    },
+
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+/* ────────────────────────────────────────────────────────────────
    Dental Lead
 ──────────────────────────────────────────────────────────────── */
 const dentalLeadSchema = new mongoose.Schema(
@@ -381,9 +440,16 @@ const dentalLeadSchema = new mongoose.Schema(
       default: "manual",
     },
 
+    // Latest invoice for this client (kept for existing code)
     invoiceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Invoice",
+    },
+
+    // Every invoice for this client + who created it
+    invoices: {
+      type: [clientInvoiceSchema],
+      default: [],
     },
 
     nextFollowUpDate: {

@@ -541,11 +541,12 @@ export const createClient = asyncHandler(async (req, res) => {
  * @route PATCH /api/leads/:id/link-invoice
  *
  * @description
- * Save the invoiceId of a newly created invoice on the client's DentalLead.
- * Works for both converted and direct clients. Agents can only link their own clients.
+ * Attach an EXISTING invoice to a client (both directions: invoice.leadId/clientId
+ * and the client's invoices[] list with who created it). New invoices raised from
+ * a client are linked automatically by createInvoice. Agents can only link their own clients.
  *
  * @body
- * invoiceId (required)
+ * invoiceId (required) — invoice _id or its invoiceId UUID
  *
  * @response
  * 200 { success: true, data: Client }

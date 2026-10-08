@@ -755,7 +755,6 @@
 //   }
 // };
 
-
 import { createInvoiceValidator } from "./invoice.validator.js";
 import {
   createInvoiceService,
@@ -776,6 +775,7 @@ import { v6 as uuidv6 } from "uuid";
 import User from "../../models/ecommarace/user.model.js";
 import Order from "../../models/ecommarace/order.model.js";
 import Invoice from "../../models/manage/invoice.model.js";
+import { getClientForInvoice, attachInvoiceToClient } from "../../services/lead.service.js";
 
 /**
  * @function createInvoice
@@ -829,7 +829,23 @@ export const createInvoice = async (req, res) => {
       });
     }
 
-    const invoice = await createInvoiceService(value);
+    // Invoice raised for a CRM client (Lead module sends leadId).
+    // Checked BEFORE creating, so a bad/foreign client never leaves an
+    // orphan invoice. leadId is read from req.body because the validator
+    // strips unknown keys from `value`.
+    let client = null;
+    if (req.body.leadId) {
+      client = await getClientForInvoice(req.body.leadId, employee);
+    }
+
+    const invoice = await createInvoiceService({
+      ...value,
+      createdBy: employee._id,
+      createdByName: `${employee.firstName || ""} ${employee.lastName || ""}`.trim() || employee.email,
+      createdByEmail: employee.email,
+      leadId: client?._id || null,
+      clientId: client?.clientId || null,
+    });
 
     await PermissionAudit.create({
       permissionAuditId: uuidv6(),
@@ -841,6 +857,17 @@ export const createInvoice = async (req, res) => {
       permission: value.permission || "invoice.manage.create",
       actionType: "Create",
     });
+
+    // Add it to the client's invoice list. Never fails the request —
+    // the invoice already carries leadId, and PATCH /leads/:id/link-invoice
+    // can re-attach it.
+    if (client) {
+      try {
+        await attachInvoiceToClient(client._id, invoice, employee);
+      } catch (linkErr) {
+        console.error("Attach invoice to client failed:", linkErr.message);
+      }
+    }
 
     return sendSuccess(res, invoice, 201, "Invoice created successfully");
   } catch (error) {

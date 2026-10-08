@@ -104,7 +104,7 @@ export const updateLead = async (id, data) => {
   const {
     stage, clientId, preSaleFollowups, postSaleFollowups,
     ordersList, flagReason, flaggedAt, flaggedBy,
-    clientOrigin, convertedAt, ...safeData
+    clientOrigin, convertedAt, invoices, ...safeData
   } = data;
 
   const lead = await DentalLead.findOne({ _id: id, ...baseQuery });
@@ -375,28 +375,100 @@ export const createClient = async (data = {}, actingEmployee) => {
   return saveWithUniqueClientId(lead);
 };
 
-/* ─── LINK INVOICE — called after the existing invoice flow creates one ──── */
-export const linkInvoice = async (id, invoiceId, requestingUser = null) => {
-  if (!mongoose.Types.ObjectId.isValid(id)) throw httpError("Invalid client id", 400);
-  if (!mongoose.Types.ObjectId.isValid(invoiceId)) throw httpError("A valid invoiceId is required", 400);
+/* ═══════════════════════════════════════════════════════════════════════
+   CLIENT ⇄ INVOICE
+   Invoice side: leadId, clientId, createdBy* (set by createInvoice)
+   Lead side:    invoices[] with who created each one + invoiceId (latest)
+═══════════════════════════════════════════════════════════════════════ */
 
-  const query = { _id: id, stage: "client", ...baseQuery };
-  if (requestingUser && requestingUser.role === ROLES.AGENT) {
-    query.assignedEmployee = requestingUser._id;
+/* ─── Client an invoice is being raised for (used by createInvoice) ─────
+   Agents can only invoice clients assigned to them.                      */
+export const getClientForInvoice = async (leadId, employee = null) => {
+  if (!mongoose.Types.ObjectId.isValid(leadId)) throw httpError("Invalid client id", 400);
+
+  const query = { _id: leadId, stage: "client", ...baseQuery };
+  if (employee && employee.role === ROLES.AGENT) query.assignedEmployee = employee._id;
+
+  const lead = await DentalLead.findOne(query)
+    .select("_id clientId doctorName clinicName assignedEmployee")
+    .lean();
+  if (!lead) throw httpError("Client not found, or not assigned to you", 404);
+  return lead;
+};
+
+/* ─── Record an invoice on the client (idempotent) ──────────────────────
+   creator = the employee who created the invoice.                        */
+export const attachInvoiceToClient = async (leadId, invoice, creator = null) => {
+  const entry = {
+    invoice: invoice._id,
+    invoiceId: invoice.invoiceId || "",
+    invoiceNumber: invoice.invoiceNumber || "",
+    totalAmount: Number(invoice.summary?.totalPayAmount || 0),
+    createdBy: creator?._id || invoice.createdBy || null,
+    createdByName: creator ? employeeName(creator) : (invoice.createdByName || ""),
+    createdByEmail: creator?.email || invoice.createdByEmail || "",
+    createdAt: invoice.createdAt || new Date(),
+  };
+
+  // $ne guard: the same invoice is never listed twice
+  await DentalLead.updateOne(
+    { _id: leadId, "invoices.invoice": { $ne: invoice._id } },
+    { $push: { invoices: entry } }
+  );
+  await DentalLead.updateOne({ _id: leadId }, { $set: { invoiceId: invoice._id } });
+
+  return entry;
+};
+
+/* Who created an older invoice that has no createdBy stored:
+   the "Create" PermissionAudit entry written by createInvoice. */
+const findInvoiceCreator = async (invoice) => {
+  if (invoice.createdBy) {
+    return Employee.findById(invoice.createdBy).select("_id firstName lastName email").lean();
   }
+  const PermissionAudit = mongoose.models.PermissionAudit;
+  if (!PermissionAudit) return null;
+  const audit = await PermissionAudit.findOne({ actionFor: invoice._id, actionType: "Create" })
+    .select("actionBy")
+    .lean();
+  if (!audit?.actionBy) return null;
+  return Employee.findById(audit.actionBy).select("_id firstName lastName email").lean();
+};
 
-  const lead = await DentalLead.findOne(query);
-  if (!lead) throw httpError("Client not found", 404);
+/* ─── LINK INVOICE — attach an EXISTING invoice to a client ──────────────
+   New invoices raised from a client are linked automatically by
+   createInvoice (it receives leadId). This endpoint is for invoices
+   created before that, or from the invoice list page.
+   invoiceRef = invoice _id (ObjectId) or its invoiceId (UUID).           */
+export const linkInvoice = async (id, invoiceRef, requestingUser = null) => {
+  if (!invoiceRef) throw httpError("invoiceId is required", 400);
 
-  // Verify the invoice exists when the Invoice model is registered
-  // (DentalLead.invoiceId already refs "Invoice").
+  const lead = await getClientForInvoice(id, requestingUser);
+
   const Invoice = mongoose.models.Invoice;
-  if (Invoice && !(await Invoice.exists({ _id: invoiceId }))) {
-    throw httpError("Invoice not found", 404);
+  if (!Invoice) throw httpError("Invoice model is not loaded", 500);
+
+  const invoice = await Invoice.findOne({
+    isDeleted: false,
+    ...(mongoose.Types.ObjectId.isValid(invoiceRef) && String(invoiceRef).length === 24
+      ? { _id: invoiceRef }
+      : { invoiceId: String(invoiceRef) }),
+  }).lean();
+  if (!invoice) throw httpError("Invoice not found", 404);
+
+  if (invoice.leadId && String(invoice.leadId) !== String(lead._id)) {
+    throw httpError("This invoice is already linked to another client", 409);
   }
 
-  lead.invoiceId = invoiceId;
-  return lead.save();
+  await Invoice.updateOne(
+    { _id: invoice._id },
+    { $set: { leadId: lead._id, clientId: lead.clientId || null } }
+  );
+
+  const creator = await findInvoiceCreator(invoice);
+  await attachInvoiceToClient(lead._id, invoice, creator);
+
+  return DentalLead.findById(lead._id).lean();
 };
 
 /* ─── LOG ORDERS FOR CLIENTS ─────────────────────────────────────────────── */

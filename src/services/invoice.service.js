@@ -296,7 +296,6 @@
 //   };
 // };
 
-
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -401,6 +400,12 @@ export const createInvoiceService = async (data) => {
     // refund settled here can be mirrored back onto that order.
     sourceOrderId: data.sourceOrderId || null,
     sourceOrderType: data.sourceOrderType || null,
+    // who created it (employee) + which CRM client it belongs to
+    createdBy: data.createdBy || null,
+    createdByName: data.createdByName || "",
+    createdByEmail: data.createdByEmail || "",
+    leadId: data.leadId || null,
+    clientId: data.clientId || null,
   });
 
   return invoice;
@@ -534,6 +539,8 @@ export const getInvoicesService = async ({ query }) => {
       { invoiceNumber: { $regex: search, $options: "i" } },
       { "billTo.companyName": { $regex: search, $options: "i" } },
       { orderNumber: { $regex: search, $options: "i" } },
+      { clientId: { $regex: search, $options: "i" } },
+      { createdByName: { $regex: search, $options: "i" } },
     ];
   }
   if (month || year) {
