@@ -295,7 +295,6 @@
 //     },
 //   };
 // };
-
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -321,28 +320,65 @@ const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
   return date;
 };
 
-export const generateCustomerNo = async ({ customerNo, contactPerson }) => {
+/* ── Customer identity helpers ─────────────────────────────────────────
+   A customer is identified by (in order):
+     1. the CRM client (leadId) the invoice was raised for
+     2. the mobile number — last 10 digits, so "+91 98765 43210",
+        "9876543210" and "098765-43210" are the same customer
+        (credit lookup already treats the phone as the customer)
+     3. only when there is no phone: company name + contact person
+   Never by contact person alone — two different people/companies with the
+   same name (e.g. "DEMO2") were being merged into one customer.        */
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const phoneKey = (s) => String(s ?? "").replace(/\D/g, "").slice(-10);
+// matches the 10 digits at the end, with any spaces/dashes in between
+const phoneRegex = (key) => new RegExp(key.split("").join("[^0-9]*") + "$");
+
+export const generateCustomerNo = async ({ customerNo, contactNumber, contactPerson, companyName, leadId }) => {
   // CASE 1 — customerNo already sent from frontend
   if (customerNo) {
     return customerNo;
   }
 
-  // CASE 2 — find existing customer by contactPerson
-  const existingCustomer = await Invoice.findOne({
-    isDeleted: false,
-    "billTo.contactPerson": {
-      $regex: new RegExp(`^${contactPerson.trim()}$`, "i"),
-    },
-  }).sort({ createdAt: 1 });
-
-  if (existingCustomer) {
-    return existingCustomer.customerNo;
+  // CASE 2 — same CRM client → same customer
+  if (leadId) {
+    const prev = await Invoice.findOne({ isDeleted: false, leadId, customerNo: { $ne: null } })
+      .sort({ createdAt: 1 })
+      .select("customerNo")
+      .lean();
+    if (prev) return prev.customerNo;
   }
 
-  // CASE 3 — generate next customer number
+  // CASE 3 — same mobile number → same customer
+  const key = phoneKey(contactNumber);
+  if (key.length === 10) {
+    const prev = await Invoice.findOne({
+      isDeleted: false,
+      "billTo.contactNumber": { $regex: phoneRegex(key) },
+    })
+      .sort({ createdAt: 1 })
+      .select("customerNo")
+      .lean();
+    if (prev) return prev.customerNo;
+  } else if (contactPerson?.trim()) {
+    // CASE 4 — no phone: exact company + person (person alone only for
+    // callers that don't pass a company, as before)
+    const query = {
+      isDeleted: false,
+      "billTo.contactPerson": { $regex: new RegExp(`^${escapeRegex(contactPerson.trim())}$`, "i") },
+    };
+    if (companyName?.trim()) {
+      query["billTo.companyName"] = { $regex: new RegExp(`^${escapeRegex(companyName.trim())}$`, "i") };
+    }
+    const prev = await Invoice.findOne(query).sort({ createdAt: 1 }).select("customerNo").lean();
+    if (prev) return prev.customerNo;
+  }
+
+  // CASE 5 — new customer
   const lastCustomer = await Invoice.findOne({})
     .sort({ customerNo: -1 })
-    .select("customerNo");
+    .select("customerNo")
+    .lean();
 
   return lastCustomer ? lastCustomer.customerNo + 1 : 1;
 };
@@ -353,7 +389,10 @@ export const createInvoiceService = async (data) => {
   const paymentTerms = data.paymentTerms || "Payable due amount in 10 days";
   let customerNo = await generateCustomerNo({
     customerNo: data.customerNo,
+    contactNumber: data.billTo?.contactNumber,
     contactPerson: data.billTo?.contactPerson,
+    companyName: data.billTo?.companyName,
+    leadId: data.leadId,
   });
   const seller = { ...getDefaultSellerDetails(), ...(data.seller || {}) };
   const bankDetails = { ...getDefaultBankDetails(), ...(data.bankDetails || {}) };

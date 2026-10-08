@@ -1332,6 +1332,15 @@ export const getInvoiceCustomers = async (req, res) => {
           contactNumber: {
             $first: "$billTo.contactNumber",
           },
+
+          // CRM client this customer belongs to (if any invoice was raised from a client)
+          clientId: {
+            $max: "$clientId",
+          },
+
+          leadId: {
+            $max: "$leadId",
+          },
         },
       },
 
@@ -1342,6 +1351,8 @@ export const getInvoiceCustomers = async (req, res) => {
           contactPerson: 1,
           companyName: 1,
           contactNumber: 1,
+          clientId: 1,
+          leadId: 1,
         },
       },
 
