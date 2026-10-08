@@ -988,6 +988,14 @@ this.summary.totalPayAmount = round2(sumNet + sumTax + freightCost);
 const paid = Math.max(Number(this.summary.paidAmount) || 0, 0);
 this.summary.paidAmount = Math.min(paid, this.summary.totalPayAmount);
 this.summary.amountToPay = Math.max(round2(this.summary.totalPayAmount - this.summary.paidAmount),0);
+
+if (!["draft", "cancelled"].includes(this.status) && this.summary.totalPayAmount > 0) {
+  if (this.summary.paidAmount >= this.summary.totalPayAmount - 0.01) {
+    this.status = "paid";
+  } else if (this.summary.paidAmount > 0 && this.status === "issued") {
+    this.status = "partially_paid";
+  }
+}
 });
 
 function round2(n) {
