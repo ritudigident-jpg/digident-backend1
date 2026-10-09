@@ -295,6 +295,11 @@
 //     },
 //   };
 // };
+
+
+
+
+import mongoose from "mongoose";
 import Invoice from "../models/manage/invoice.model.js";
 import { generateInvoiceNumbers } from "../helpers/generateInvoiceNumbers.js";
 import { getDefaultSellerDetails, getDefaultBankDetails } from "../helpers/invoiceDefault.helper.js";
@@ -310,6 +315,58 @@ import {
   getInvoiceCreditCap,
 } from "./creditNote.service.js";
 import { syncCustomerFromInvoice } from "../helpers/linkedSync.helper.js";
+import DentalLead from "../models/manage/dentalLead.js";
+import { fuzzySearch } from "../helpers/fuzzySearch.helper.js";
+
+/* =========================================================================
+   ROLE-WISE VISIBILITY
+   AGENT (role 4) → sirf apne invoices:
+       • jo usne khud banaye (createdBy), aur
+       • jo uske abhi assigned clients ke hain (client transfer ho to naye
+         agent ko purane invoices bhi dikhein)
+   Baaki sab roles (Super Admin / Admin / Manager / Executive) → sab invoices
+   ========================================================================= */
+export const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
+export const isAgent = (employee) => Number(employee?.role) === ROLES.AGENT;
+
+export const buildInvoiceScope = async (employee) => {
+  if (!employee || !isAgent(employee)) return {};
+  const myClients = await DentalLead.find({
+    assignedEmployee: employee._id,
+    stage: "client",
+    isDeleted: false,
+  }).distinct("_id");
+  return { $or: [{ createdBy: employee._id }, { leadId: { $in: myClients } }] };
+};
+
+export const assertInvoiceAccess = async (invoice, employee) => {
+  if (!employee || !isAgent(employee)) return;
+  if (invoice.createdBy && String(invoice.createdBy) === String(employee._id)) return;
+  if (invoice.leadId) {
+    const mine = await DentalLead.exists({
+      _id: invoice.leadId,
+      assignedEmployee: employee._id,
+      isDeleted: false,
+    });
+    if (mine) return;
+  }
+  const error = new Error("Ye invoice aapka nahi hai");
+  error.statusCode = 403;
+  error.errorCode = "INVOICE_FORBIDDEN";
+  throw error;
+};
+
+/* Invoice "type" — list page ke tabs ke liye
+   client    → CRM client se bana (leadId set)
+   manual    → Manual Order se auto-bana
+   ecommerce → Website order se
+   other     → purane invoices jo na client se jude na order se          */
+const TYPE_FILTERS = {
+  client: { leadId: { $ne: null } },
+  manual: { sourceOrderType: "manual" },
+  ecommerce: { sourceOrderType: "ecommerce" },
+  other: { leadId: null, sourceOrderType: null },
+};
 
 const getDueDateFromTerms = (invoiceDate, paymentTerms) => {
   const date = new Date(invoiceDate);
@@ -454,7 +511,7 @@ export const createInvoiceService = async (data) => {
  * source: "api"        -> normal edit from UI/controller
  *         "order-sync" -> called by resyncInvoiceForOrder (manualOrder.service.js)
  */
-export const updateInvoiceService = async ({ invoiceId, data, source = "api" }) => {
+export const updateInvoiceService = async ({ invoiceId, data, source = "api", employee = null }) => {
   const invoice = await Invoice.findOne({ invoiceId, isDeleted: false });
 
   if (!invoice) {
@@ -463,6 +520,9 @@ export const updateInvoiceService = async ({ invoiceId, data, source = "api" }) 
     error.errorCode = "INVOICE_NOT_FOUND";
     throw error;
   }
+
+  // agent sirf apna invoice edit kar sakta hai (order-sync internal hai, check nahi)
+  if (source === "api") await assertInvoiceAccess(invoice, employee);
 
   // Manual/ecommerce order invoice ke items sirf order se badlenge,
   // warna agla resync UI ka edit overwrite kar dega.
@@ -535,7 +595,7 @@ export const updateInvoiceService = async ({ invoiceId, data, source = "api" }) 
   return invoice;
 };
 
-export const deleteInvoiceService = async ({ invoiceId }) => {
+export const deleteInvoiceService = async ({ invoiceId, employee = null }) => {
   const invoice = await Invoice.findOne({ invoiceId, isDeleted: false });
   if (!invoice) {
     const error = new Error("Invoice not found");
@@ -543,6 +603,7 @@ export const deleteInvoiceService = async ({ invoiceId }) => {
     error.errorCode = "INVOICE_NOT_FOUND";
     throw error;
   }
+  await assertInvoiceAccess(invoice, employee);
 
   // Credit notes linked hain to delete nahi hone dena
   if ((invoice.creditNoteIds || []).length || (invoice.appliedCredits || []).length) {
@@ -557,7 +618,7 @@ export const deleteInvoiceService = async ({ invoiceId }) => {
   return invoice;
 };
 
-export const getInvoiceByIdService = async ({ invoiceId }) => {
+export const getInvoiceByIdService = async ({ invoiceId, employee = null }) => {
   const invoice = await Invoice.findOne({ invoiceId, isDeleted: false }).lean();
   if (!invoice) {
     const error = new Error("Invoice not found");
@@ -565,22 +626,39 @@ export const getInvoiceByIdService = async ({ invoiceId }) => {
     error.errorCode = "INVOICE_NOT_FOUND";
     throw error;
   }
+  await assertInvoiceAccess(invoice, employee);
   return invoice;
 };
 
-export const getInvoicesService = async ({ query }) => {
+/**
+ * Invoice list.
+ * query: {
+ *   page, limit,
+ *   search    — fuzzy: naam / clinic / phone / invoice no. / client id / agent
+ *               (spelling thodi galat ho tab bhi milega)
+ *   type      — "client" | "manual" | "ecommerce" | "other" (default: sab)
+ *   status    — draft | issued | paid | partially_paid | cancelled
+ *   createdBy — employee _id (sirf admin ke liye: "is agent ke invoices")
+ *   leadId    — ek client ke invoices
+ *   month, year
+ * }
+ * employee — logged-in Employee (agent ho to apne invoices tak simit)
+ */
+export const getInvoicesService = async ({ query, employee = null }) => {
   const { page, limit, skip } = getPagination(query);
-  const { search, status, month, year } = query;
-  const filter = { isDeleted: false };
+  const { search, status, month, year, type, createdBy, leadId } = query;
+
+  const scope = await buildInvoiceScope(employee);
+  const base = { isDeleted: false, ...scope };
+
+  const filter = { ...base };
   if (status) filter.status = status;
-  if (search) {
-    filter.$or = [
-      { invoiceNumber: { $regex: search, $options: "i" } },
-      { "billTo.companyName": { $regex: search, $options: "i" } },
-      { orderNumber: { $regex: search, $options: "i" } },
-      { clientId: { $regex: search, $options: "i" } },
-      { createdByName: { $regex: search, $options: "i" } },
-    ];
+  if (type && TYPE_FILTERS[type]) Object.assign(filter, TYPE_FILTERS[type]);
+  if (createdBy && !isAgent(employee) && mongoose.Types.ObjectId.isValid(createdBy)) {
+    filter.createdBy = new mongoose.Types.ObjectId(createdBy);
+  }
+  if (leadId && mongoose.Types.ObjectId.isValid(leadId)) {
+    filter.leadId = new mongoose.Types.ObjectId(leadId);
   }
   if (month || year) {
     const now = new Date();
@@ -596,13 +674,55 @@ export const getInvoicesService = async ({ query }) => {
     }
     filter.invoiceDate = { $gte: startDate, $lt: endDate };
   }
-  const [invoices, totalItems] = await Promise.all([
-    Invoice.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    Invoice.countDocuments(filter),
+
+  // Tabs ke upar count badges: "Client (420) · Manual Order (310) · ..."
+  // (role scope ke andar hi gine jaate hain)
+  const typeCountsPromise = Invoice.aggregate([
+    { $match: base },
+    {
+      $group: {
+        _id: null,
+        all: { $sum: 1 },
+        client: { $sum: { $cond: [{ $ne: [{ $ifNull: ["$leadId", null] }, null] }, 1, 0] } },
+        manual: { $sum: { $cond: [{ $eq: ["$sourceOrderType", "manual"] }, 1, 0] } },
+        ecommerce: { $sum: { $cond: [{ $eq: ["$sourceOrderType", "ecommerce"] }, 1, 0] } },
+        other: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: [{ $ifNull: ["$leadId", null] }, null] },
+                  { $eq: [{ $ifNull: ["$sourceOrderType", null] }, null] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+    { $project: { _id: 0 } },
   ]);
+
+  let invoices;
+  let totalItems;
+  if (search && String(search).trim()) {
+    const result = await fuzzySearch(Invoice, { filter, q: search, skip, limit });
+    invoices = result.items;
+    totalItems = result.total;
+  } else {
+    [invoices, totalItems] = await Promise.all([
+      Invoice.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Invoice.countDocuments(filter),
+    ]);
+  }
+
+  const [typeCounts] = await typeCountsPromise;
   const totalPages = Math.ceil(totalItems / limit);
   return {
     invoices,
+    typeCounts: typeCounts || { all: 0, client: 0, manual: 0, ecommerce: 0, other: 0 },
     pagination: {
       totalItems,
       totalPages,

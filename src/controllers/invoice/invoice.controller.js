@@ -755,6 +755,7 @@
 //   }
 // };
 
+
 import { createInvoiceValidator } from "./invoice.validator.js";
 import {
   createInvoiceService,
@@ -766,6 +767,7 @@ import {
   getInvoiceCreditNotesService,
   createInvoiceReturnService,
   getCustomerCreditLookupService,
+  buildInvoiceScope,
 } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -776,6 +778,10 @@ import User from "../../models/ecommarace/user.model.js";
 import Order from "../../models/ecommarace/order.model.js";
 import Invoice from "../../models/manage/invoice.model.js";
 import { getClientForInvoice, attachInvoiceToClient } from "../../services/lead.service.js";
+
+// logged-in employee (role check ke liye). Ecommerce user ho to null.
+const getEmployee = (req) =>
+  req.user?.email ? Employee.findOne({ email: req.user.email }).lean() : null;
 
 /**
  * @function createInvoice
@@ -829,17 +835,36 @@ export const createInvoice = async (req, res) => {
       });
     }
 
-    // Invoice raised for a CRM client (Lead module sends leadId).
-    // Checked BEFORE creating, so a bad/foreign client never leaves an
-    // orphan invoice. leadId is read from req.body because the validator
-    // strips unknown keys from `value`.
-    let client = null;
-    if (req.body.leadId) {
-      client = await getClientForInvoice(req.body.leadId, employee);
+    // RULE: "Create Invoice" sirf client ke liye — pehle client banao
+    // (Leads ➔ Convert to Client, ya Create Client), fir invoice.
+    // Manual-order aur ecommerce invoices apne flow se bante hain
+    // (createInvoiceService direct call) — un par ye rule nahi lagta.
+    // leadId req.body se padhte hain kyunki validator unknown keys hata deta hai.
+    if (!req.body.leadId) {
+      return sendError(res, {
+        message: "Pehle client select karo — client ke bina invoice nahi ban sakta",
+        statusCode: 400,
+        errorCode: "CLIENT_REQUIRED",
+      });
     }
+
+    // Agent sirf apne assigned client ka invoice bana sakta hai
+    const client = await getClientForInvoice(req.body.leadId, employee);
+
+    // billTo ke khali fields client profile se bhar do
+    const billTo = {
+      ...value.billTo,
+      companyName: value.billTo.companyName || client.clinicName || client.doctorName,
+      contactPerson: value.billTo.contactPerson || client.doctorName || "",
+      contactNumber: value.billTo.contactNumber || client.contact || "",
+      address:
+        value.billTo.address ||
+        [client.address, client.city, client.state].filter(Boolean).join(", "),
+    };
 
     const invoice = await createInvoiceService({
       ...value,
+      billTo,
       createdBy: employee._id,
       createdByName: `${employee.firstName || ""} ${employee.lastName || ""}`.trim() || employee.email,
       createdByEmail: employee.email,
@@ -1017,6 +1042,7 @@ export const updateInvoice = async (req, res) => {
     const invoice = await updateInvoiceService({
       invoiceId: req.params.invoiceId,
       data: value,
+      employee,
     });
 
     await PermissionAudit.create({
@@ -1133,6 +1159,7 @@ export const deleteInvoice = async (req, res) => {
     }
     const invoice = await deleteInvoiceService({
       invoiceId: req.params.invoiceId,
+      employee,
     });
     await PermissionAudit.create({
       permissionAuditId: uuidv6(),
@@ -1264,8 +1291,10 @@ export const getInvoiceByIdForUser = async (req, res) => {
  */
 export const getInvoiceById = async (req, res) => {
   try {
+    const employee = await getEmployee(req);
     const invoice = await getInvoiceByIdService({
       invoiceId: req.params.invoiceId,
+      employee,
     });
     return sendSuccess(res, invoice, 200, "Invoice fetched successfully");
   } catch (error) {
@@ -1298,10 +1327,12 @@ export const getInvoiceById = async (req, res) => {
  */
 export const getInvoiceCustomers = async (req, res) => {
   try {
+    const scope = await buildInvoiceScope(await getEmployee(req));
     const customers = await Invoice.aggregate([
       {
         $match: {
           isDeleted: false,
+          ...scope,
         },
       },
 
@@ -1450,9 +1481,11 @@ export const getInvoicesByCustomerId = async (req, res) => {
         errorCode: "CUSTOMER_NO_REQUIRED",
       });
     }
+    const scope = await buildInvoiceScope(await getEmployee(req));
     const invoices = await Invoice.find({
       customerNo,
       isDeleted: false,
+      ...scope,
     }).sort({ createdAt: -1 });
 
     if (!invoices.length) {
@@ -1530,7 +1563,8 @@ export const getInvoices = async (req, res) => {
       }
     }
 
-    const data = await getInvoicesService({ query: req.query });
+    const employee = await getEmployee(req);
+    const data = await getInvoicesService({ query: req.query, employee });
 
     return sendSuccess(
       res,

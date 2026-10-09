@@ -554,8 +554,10 @@
 // const Invoice = model("Invoice", invoiceSchema);
 // export default Invoice;
 
+
 import mongoose from "mongoose";
 import { v6 as uuidv6 } from "uuid";
+import { buildInvoiceSearchIndex } from "../../helpers/fuzzySearch.helper.js";
 const { Schema, model } = mongoose;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -857,6 +859,48 @@ const invoiceSchema = new Schema(
       default: null,
     },
 
+    /* ================= CRM CLIENT + CREATOR =================
+       Pehle ye fields schema mein nahi the, isliye Mongoose inhe save
+       karte waqt chupchaap hata deta tha (strict mode) — agent-wise
+       filter isi wajah se kabhi kaam nahi karta tha.
+       leadId    → DentalLead (stage "client") jiske liye invoice bana
+       createdBy → Employee (agent) jisne invoice banaya               */
+    leadId: {
+      type: Schema.Types.ObjectId,
+      ref: "DentalLead",
+      default: null,
+      index: true,
+    },
+    clientId: {
+      // "DIGI-DENT-001" — display + search ke liye copy
+      type: String,
+      trim: true,
+      default: null,
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+      index: true,
+    },
+    createdByName: { type: String, trim: true, default: "" },
+    createdByEmail: { type: String, trim: true, lowercase: true, default: "" },
+
+    /* ================= FUZZY SEARCH INDEX =================
+       Pre-save hook se apne aap banta hai (helpers/fuzzySearch.helper.js).
+       API response mein nahi bhejte (select: false). */
+    searchIndex: {
+      type: {
+        _id: false,
+        text: { type: String, default: "" },
+        keys: { type: [String], default: [] },
+        grams: { type: [String], default: [] },
+        digits: { type: String, default: "" },
+      },
+      default: () => ({}),
+      select: false,
+    },
+
     /* ================= CREDIT NOTE / REFUND SETTLEMENT =================
        This is the ONLY place a pending refund (from a return or a
        cancellation, on ANY order type) gets settled — either as a real
@@ -996,7 +1040,19 @@ if (!["draft", "cancelled"].includes(this.status) && this.summary.totalPayAmount
     this.status = "partially_paid";
   }
 }
+
+// fuzzy search index — har save par fresh (name/phone/number badle to bhi)
+this.searchIndex = buildInvoiceSearchIndex(this);
 });
+
+/* ─── Indexes ───────────────────────────────────────────────────────────────
+   List page ke filters + fuzzy search candidates fast rahen (1000+ invoices) */
+invoiceSchema.index({ isDeleted: 1, createdAt: -1 });
+invoiceSchema.index({ isDeleted: 1, sourceOrderType: 1, createdAt: -1 });
+invoiceSchema.index({ isDeleted: 1, createdBy: 1, createdAt: -1 });
+invoiceSchema.index({ isDeleted: 1, leadId: 1, createdAt: -1 });
+invoiceSchema.index({ "searchIndex.keys": 1 });
+invoiceSchema.index({ "searchIndex.grams": 1 });
 
 function round2(n) {
   return Math.round(n * 100) / 100;
