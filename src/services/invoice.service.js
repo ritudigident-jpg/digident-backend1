@@ -350,7 +350,7 @@ export const assertInvoiceAccess = async (invoice, employee) => {
     });
     if (mine) return;
   }
-  const error = new Error("Ye invoice aapka nahi hai");
+  const error = new Error("You do not have access to this invoice");
   error.statusCode = 403;
   error.errorCode = "INVOICE_FORBIDDEN";
   throw error;
@@ -527,7 +527,7 @@ export const updateInvoiceService = async ({ invoiceId, data, source = "api", em
   // Manual/ecommerce order invoice ke items sirf order se badlenge,
   // warna agla resync UI ka edit overwrite kar dega.
   if (data.items && invoice.sourceOrderId && source !== "order-sync") {
-    const error = new Error("Is invoice ke items order se aate hain — order mein edit karo");
+    const error = new Error("This invoice's items come from its order — edit them on the order instead");
     error.statusCode = 400;
     error.errorCode = "ITEMS_MANAGED_BY_ORDER";
     throw error;
@@ -607,7 +607,7 @@ export const deleteInvoiceService = async ({ invoiceId, employee = null }) => {
 
   // Credit notes linked hain to delete nahi hone dena
   if ((invoice.creditNoteIds || []).length || (invoice.appliedCredits || []).length) {
-    const error = new Error("Is invoice par credit notes linked hain, delete nahi ho sakta");
+    const error = new Error("This invoice has credit notes linked to it and cannot be deleted");
     error.statusCode = 400;
     error.errorCode = "INVOICE_HAS_CREDIT_NOTES";
     throw error;
@@ -1107,7 +1107,7 @@ export const createInvoiceReturnService = async (data, currentUser) => {
   if (refundableAmountDelta > maxRefundable + 0.01) {
     const error = new Error(
       `Refund amount (${refundableAmountDelta.toFixed(2)}) is more than what's left to give back on this invoice (${maxRefundable.toFixed(2)}). ` +
-      `Is invoice par pehle se credit note / refund ban chuka hai.`
+      `A credit note / refund has already been issued on this invoice.`
     );
     error.statusCode = 400;
     error.errorCode = "REFUND_EXCEEDS_PAID";

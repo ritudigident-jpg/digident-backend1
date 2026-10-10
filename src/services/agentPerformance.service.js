@@ -22,7 +22,20 @@ import DentalLead from "../models/manage/dentalLead.js";
 import Employee from "../models/manage/employee.model.js";
 
 const ROLES = { SUPERADMIN: 0, ADMIN: 1, MANAGER: 2, EXECUTIVE: 3, AGENT: 4 };
-const BILLABLE = ["issued", "partially_paid", "paid"]; // draft + cancelled sale nahi gine jaate
+const BILLABLE = ["issued", "partially_paid", "paid"]; // draft + cancelled are not counted as sales
+
+/* "Paid" = status is paid AND the money is actually recorded (paidAmount
+   covers the total). An invoice marked "paid" by hand with no payment
+   entered is reported separately as "marked paid, payment missing" so it
+   never inflates the incentive basis. */
+const FULLY_PAID_EXPR = {
+  $and: [
+    { $eq: ["$status", "paid"] },
+    { $gte: [{ $ifNull: ["$summary.paidAmount", 0] }, { $subtract: [{ $ifNull: ["$summary.totalPayAmount", 0] }, 0.01] }] },
+  ],
+};
+const isFullyPaid = (inv) =>
+  inv.status === "paid" && Number(inv.summary?.paidAmount || 0) >= Number(inv.summary?.totalPayAmount || 0) - 0.01;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const employeeName = (e) =>
   e ? `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.email || "" : "";
@@ -46,7 +59,7 @@ const parseRange = ({ from, to } = {}) => {
   const start = new Date(`${f}T00:00:00.000+05:30`);
   const end = new Date(`${t}T23:59:59.999+05:30`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw httpError("Invalid date range", 400);
-  if (start > end) throw httpError("'from' date 'to' date se pehle honi chahiye", 400);
+  if (start > end) throw httpError("'from' date must be on or before the 'to' date", 400);
   return { start, end, from: f, to: t };
 };
 
@@ -58,8 +71,8 @@ const getInvoiceModel = () => {
 
 const emptyRow = () => ({
   clients: { won: 0, converted: 0, direct: 0, current: 0 },
-  invoices: { total: 0, billable: 0, paid: 0, partial: 0, unpaid: 0, cancelled: 0, draft: 0, clientsBilled: 0 },
-  amounts: { billed: 0, received: 0, due: 0, paidInvoicesValue: 0, returned: 0 },
+  invoices: { total: 0, billable: 0, paid: 0, partial: 0, unpaid: 0, cancelled: 0, draft: 0, clientsBilled: 0, paidPaymentMissing: 0 },
+  amounts: { billed: 0, received: 0, due: 0, paidInvoicesValue: 0, returned: 0, paymentMissing: 0 },
   products: { unitsSold: 0, distinct: 0, top: [] },
   activity: { followups: 0 },
 });
@@ -88,6 +101,8 @@ export const getAgentPerformance = async (query = {}) => {
         $addFields: {
           _billable: { $in: ["$status", BILLABLE] },
           _total: { $ifNull: ["$summary.totalPayAmount", 0] },
+          _paidAmt: { $ifNull: ["$summary.paidAmount", 0] },
+          _fullyPaid: FULLY_PAID_EXPR,
         },
       },
       {
@@ -95,7 +110,19 @@ export const getAgentPerformance = async (query = {}) => {
           _id: "$createdBy",
           total: { $sum: 1 },
           billable: { $sum: { $cond: ["$_billable", 1, 0] } },
-          paid: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] } },
+          paid: { $sum: { $cond: ["$_fullyPaid", 1, 0] } },
+          paidPaymentMissing: {
+            $sum: { $cond: [{ $and: [{ $eq: ["$status", "paid"] }, { $not: ["$_fullyPaid"] }] }, 1, 0] },
+          },
+          paymentMissing: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ["$status", "paid"] }, { $not: ["$_fullyPaid"] }] },
+                { $max: [{ $subtract: ["$_total", "$_paidAmt"] }, 0] },
+                0,
+              ],
+            },
+          },
           partial: { $sum: { $cond: [{ $eq: ["$status", "partially_paid"] }, 1, 0] } },
           unpaid: { $sum: { $cond: [{ $eq: ["$status", "issued"] }, 1, 0] } },
           cancelled: { $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] } },
@@ -111,7 +138,7 @@ export const getAgentPerformance = async (query = {}) => {
               ],
             },
           },
-          paidInvoicesValue: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$_total", 0] } },
+          paidInvoicesValue: { $sum: { $cond: ["$_fullyPaid", "$_total", 0] } },
           returned: {
             $sum: {
               $cond: [
@@ -212,11 +239,13 @@ export const getAgentPerformance = async (query = {}) => {
     r.invoices = {
       total: a.total, billable: a.billable, paid: a.paid, partial: a.partial,
       unpaid: a.unpaid, cancelled: a.cancelled, draft: a.draft,
+      paidPaymentMissing: a.paidPaymentMissing,
       clientsBilled: (a.clientsBilled || []).filter(Boolean).length,
     };
     r.amounts = {
       billed: r2(a.billed), received: r2(a.received), due: r2(a.due),
       paidInvoicesValue: r2(a.paidInvoicesValue), returned: r2(a.returned),
+      paymentMissing: r2(a.paymentMissing),
     };
   }
   for (const p of productAgg) {
@@ -273,6 +302,8 @@ export const getAgentPerformance = async (query = {}) => {
     received: r2(sum((a) => a.amounts.received)),
     due: r2(sum((a) => a.amounts.due)),
     paidInvoicesValue: r2(sum((a) => a.amounts.paidInvoicesValue)),
+    paidPaymentMissing: sum((a) => a.invoices.paidPaymentMissing),
+    paymentMissing: r2(sum((a) => a.amounts.paymentMissing)),
     followups: sum((a) => a.activity.followups),
   };
 
@@ -321,7 +352,7 @@ export const getAgentPerformanceDetail = async (employeeId, query = {}) => {
             _id: "$leadId",
             count: { $sum: 1 },
             billed: { $sum: { $ifNull: ["$summary.totalPayAmount", 0] } },
-            paidCount: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] } },
+            paidCount: { $sum: { $cond: [FULLY_PAID_EXPR, 1, 0] } },
           },
         },
       ])
@@ -361,6 +392,11 @@ export const getAgentPerformanceDetail = async (employeeId, query = {}) => {
       total: r2(inv.summary?.totalPayAmount),
       paid: r2(inv.summary?.paidAmount),
       due: ["issued", "partially_paid"].includes(inv.status) ? r2(inv.summary?.amountToPay) : 0,
+      fullyPaid: isFullyPaid(inv),
+      // marked "paid" but the payment was never entered
+      paymentMissing: inv.status === "paid" && !isFullyPaid(inv)
+        ? r2(Math.max(Number(inv.summary?.totalPayAmount || 0) - Number(inv.summary?.paidAmount || 0), 0))
+        : 0,
       returned: r2(Number(inv.refundableAmount || 0) + Number(inv.partialRefundAmount || 0)),
     };
   });
@@ -380,14 +416,16 @@ export const getAgentPerformanceDetail = async (employeeId, query = {}) => {
     },
     summary: {
       invoices: billableRows.length,
-      paidInvoices: billableRows.filter((r) => r.status === "paid").length,
+      paidInvoices: billableRows.filter((r) => r.fullyPaid).length,
+      paidPaymentMissingInvoices: billableRows.filter((r) => r.paymentMissing > 0).length,
+      paymentMissing: sum(billableRows, "paymentMissing"),
       partialInvoices: billableRows.filter((r) => r.status === "partially_paid").length,
       unpaidInvoices: billableRows.filter((r) => r.status === "issued").length,
       cancelledInvoices: rows.filter((r) => r.status === "cancelled").length,
       billed: sum(billableRows, "total"),
       received: sum(billableRows, "paid"),
       due: sum(billableRows, "due"),
-      paidInvoicesValue: sum(billableRows.filter((r) => r.status === "paid"), "total"),
+      paidInvoicesValue: sum(billableRows.filter((r) => r.fullyPaid), "total"),
       returned: sum(billableRows, "returned"),
       unitsSold: billableRows.reduce((s, r) => s + r.units, 0),
       clientsWon: wonClients.length,

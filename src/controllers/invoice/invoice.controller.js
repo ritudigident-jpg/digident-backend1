@@ -842,7 +842,7 @@ export const createInvoice = async (req, res) => {
     // leadId req.body se padhte hain kyunki validator unknown keys hata deta hai.
     if (!req.body.leadId) {
       return sendError(res, {
-        message: "Pehle client select karo — client ke bina invoice nahi ban sakta",
+        message: "Please select a client first — an invoice can only be created for a client",
         statusCode: 400,
         errorCode: "CLIENT_REQUIRED",
       });

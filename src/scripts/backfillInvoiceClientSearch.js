@@ -39,9 +39,9 @@ const flush = async (Model, ops, label) => {
 };
 
 const run = async () => {
-  if (!URI) throw new Error("MONGO_URI env variable set karo");
+  if (!URI) throw new Error("Set the MONGO_URI environment variable");
   await mongoose.connect(URI);
-  console.log(APPLY ? "APPLY mode — changes save honge\n" : "DRY RUN — kuch save nahi hoga (--apply lagao)\n");
+  console.log(APPLY ? "APPLY mode — changes will be saved\n" : "DRY RUN — nothing is saved (add --apply to save)\n");
 
   /* ---------- 1. client link from DentalLead.invoices[] ---------- */
   const leads = await DentalLead.find({ "invoices.0": { $exists: true } })
