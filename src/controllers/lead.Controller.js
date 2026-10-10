@@ -658,6 +658,7 @@
 
 import * as svc from "../services/lead.service.js";
 import * as asvc from "../services/assignment.service.js";
+import * as psvc from "../services/agentPerformance.service.js";
 import { ok, asyncHandler } from "../helpers/error.helper.js";
 
 // constants/roles.js
@@ -1355,6 +1356,48 @@ export const getAgentsOverview = asyncHandler(async (req, res) => {
   ok(res, { data });
 });
  
+/**
+ * @function getAgentPerformance
+ *
+ * @route GET /api/leads/admin/agent-performance?from=YYYY-MM-DD&to=YYYY-MM-DD
+ *
+ * @description
+ * Admin / Super Admin only. Har agent ne period mein kitne client banaye,
+ * kitne products beche, kitne invoice banaye / paid hue, kitna amount aaya.
+ * Incentive ka % yahan nahi — admin paid amount dekh ke khud tay karta hai.
+ * Default period: is mahine ki 1 tareekh se aaj tak.
+ *
+ * @response
+ * 200 { success: true, data: { range, totals, agents: [...] } }
+ *
+ * @errors
+ * 401 - Not authenticated
+ * 403 - Only Admin/Super Admin
+ */
+export const getAgentPerformance = asyncHandler(async (req, res) => {
+  await assertAdmin(req);
+  const data = await psvc.getAgentPerformance(req.query);
+  ok(res, { data });
+}, 400);
+
+/**
+ * @function getAgentPerformanceDetail
+ *
+ * @route GET /api/leads/admin/agent-performance/:employeeId?from=&to=
+ *
+ * @description
+ * Admin / Super Admin only. Ek agent ke invoices (status / paid / baaki /
+ * products), products ka breakdown, aur is period mein bane clients.
+ *
+ * @response
+ * 200 { success: true, data: { range, agent, summary, invoices, products, newClients } }
+ */
+export const getAgentPerformanceDetail = asyncHandler(async (req, res) => {
+  await assertAdmin(req);
+  const data = await psvc.getAgentPerformanceDetail(req.params.employeeId, req.query);
+  ok(res, { data });
+}, 400);
+
 export const getLeadsByAgent = asyncHandler(async (req, res) => {
   await assertAdmin(req);
   const result = await svc.getLeadsByAgent(req.params.employeeId, req.query);

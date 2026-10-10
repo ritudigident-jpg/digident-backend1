@@ -732,6 +732,12 @@
 //     totalPages: Math.ceil(total / parseInt(limit)),
 //   };
 // };
+
+
+
+
+
+
 import XLSX from "xlsx";
 import mongoose from "mongoose";
 import DentalLead from "../models/manage/dentalLead.js";
@@ -1267,7 +1273,8 @@ export const getClientProfile = async (id, requestingUser = null) => {
   const invoices = Invoice
     ? await Invoice.find({ leadId: lead._id, isDeleted: false })
         .select(
-          "invoiceId invoiceNumber invoiceDate dueDate status items.description items.qty " +
+          "invoiceId invoiceNumber invoiceDate dueDate status items.description items.qty items.price " +
+          "items.discountPercent items.discountValue items.hsnCode " +
           "summary refundStatus refundableAmount partialRefundAmount " +
           "createdByName createdByEmail createdAt sourceOrderType"
         )

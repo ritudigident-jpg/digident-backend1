@@ -53,7 +53,6 @@
 // });
 
 // export default router;
-
 import express from "express";
 import * as lc from "../../controllers/lead.Controller.js";
 import auth from "../../middlewares/auth.middleware.js";
@@ -99,6 +98,10 @@ router.post("/agents/:employeeId/departure", lc.handleDeparture);
 
 router.get("/admin/agents-overview",        lc.getAgentsOverview);
 router.get("/admin/by-agent/:employeeId",   lc.getLeadsByAgent);
+
+// NEW — Agent Performance page (Admin / Super Admin only)
+router.get("/admin/agent-performance",              lc.getAgentPerformance);
+router.get("/admin/agent-performance/:employeeId",  lc.getAgentPerformanceDetail);
 
 router.get("/debug/unassigned-count", auth, async (req, res) => {
   const count = await dentalLead.countDocuments({ assignedEmployee: null, isDeleted: false });

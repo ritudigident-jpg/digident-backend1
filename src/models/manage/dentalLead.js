@@ -508,7 +508,6 @@
 
 // export default mongoose.model("DentalLead", dentalLeadSchema);
 
-
 import mongoose from "mongoose";
 import { buildClientSearchIndex } from "../../helpers/fuzzySearch.helper.js";
 
