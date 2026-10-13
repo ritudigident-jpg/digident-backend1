@@ -756,6 +756,7 @@
 // };
 
 
+
 import { createInvoiceValidator } from "./invoice.validator.js";
 import {
   createInvoiceService,
@@ -768,6 +769,7 @@ import {
   createInvoiceReturnService,
   getCustomerCreditLookupService,
   buildInvoiceScope,
+  getInvoiceClientsService,
 } from "../../services/invoice.service.js";
 import { sendError, handleError } from "../../helpers/error.helper.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
@@ -1856,6 +1858,25 @@ export const getCustomerCreditLookup = async (req, res) => {
 
     const data = await getCustomerCreditLookupService({ phone });
     return sendSuccess(res, data, 200, "Credit lookup complete");
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+/**
+ * @function getInvoiceClients
+ * @route GET /api/v1/invoice/manage/clients/:permission?search=&limit=
+ * @description CRM clients for the "Create Invoice" client picker
+ * (agent → only their assigned clients).
+ */
+export const getInvoiceClients = async (req, res) => {
+  try {
+    const employee = await getEmployee(req);
+    const data = await getInvoiceClientsService({
+      search: req.query.search,
+      limit: req.query.limit,
+      employee,
+    });
+    return sendSuccess(res, data, 200, "Clients fetched successfully");
   } catch (error) {
     return handleError(res, error);
   }

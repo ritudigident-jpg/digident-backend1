@@ -17,6 +17,7 @@
 // router.get("/customers",auth, getInvoiceCustomers );
 // export default router;
 
+
 import express from "express";
 import {
   createInvoice,
@@ -35,6 +36,7 @@ import {
   getInvoiceCreditNotes,
   createInvoiceReturn,
   getCustomerCreditLookup,
+  getInvoiceClients,
 } from "../../controllers/invoice/invoice.controller.js";
 import auth from "../../middlewares/auth.middleware.js";
 import { checkPermission } from "../../middlewares/permission.middleware.js";
@@ -57,6 +59,9 @@ router.post("/manage/return/:invoiceId", auth, checkPermission, createInvoiceRet
 
 // "Check credit": every invoice that still owes this phone number money.
 router.get("/manage/credit-lookup/:phone", auth, checkPermission, getCustomerCreditLookup);
+
+// Client picker for "Create Invoice" (invoice sirf client ke liye banta hai)
+router.get("/manage/clients/:permission", auth, checkPermission, getInvoiceClients);
 
 router.post("/create", auth, createInvoiceFromOrder);
 router.get("/get/:invoiceId", auth, getInvoiceByIdForUser);

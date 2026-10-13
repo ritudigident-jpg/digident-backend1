@@ -356,6 +356,43 @@ export const assertInvoiceAccess = async (invoice, employee) => {
   throw error;
 };
 
+/* =========================================================================
+   CLIENT PICKER for "Create Invoice"
+   Create Invoice sirf CRM client (DentalLead, stage "client") ke liye banta
+   hai (controller CLIENT_REQUIRED). Ye list Create Invoice page ka client
+   dropdown bharti hai. Agent → sirf apne assigned clients.
+   query: { search?, limit? }   search = naam / clinic / phone / client id
+   ========================================================================= */
+export const getInvoiceClientsService = async ({ search, limit = 20, employee = null }) => {
+  const filter = { stage: "client", isDeleted: false };
+  if (employee && isAgent(employee)) filter.assignedEmployee = employee._id;
+
+  const q = String(search || "").trim();
+  if (q) {
+    const rx = new RegExp(escapeRegex(q), "i");
+    const or = [{ doctorName: rx }, { clinicName: rx }, { clientId: rx }, { contact: rx }, { email: rx }];
+    const key = phoneKey(q);
+    if (key.length >= 4) or.push({ contact: { $regex: new RegExp(key.split("").join("[^0-9]*")) } });
+    filter.$or = or;
+  }
+
+  const leads = await DentalLead.find(filter)
+    .sort({ updatedAt: -1 })
+    .limit(Math.min(Math.max(Number(limit) || 20, 1), 50))
+    .lean();
+
+  return leads.map((l) => ({
+    leadId: l._id,
+    clientId: l.clientId || null,
+    doctorName: l.doctorName || "",
+    clinicName: l.clinicName || "",
+    contact: l.contact || "",
+    email: l.email || "",
+    address: [l.address, l.city, l.state].filter(Boolean).join(", "),
+    gstin: l.gstin || l.gstNumber || "",
+  }));
+};
+
 /* Invoice "type" — list page ke tabs ke liye
    client    → CRM client se bana (leadId set)
    manual    → Manual Order se auto-bana
@@ -563,7 +600,11 @@ export const updateInvoiceService = async ({ invoiceId, data, source = "api", em
     });
   }
   if (data.summary) {
-    invoice.summary = { ...invoice.summary.toObject?.(), ...data.summary };
+    const summary = { ...data.summary };
+    // Order se bane invoice ka freight order ki shipping hai — UI se edit
+    // karne par dono alag ho jate the. Sirf order-sync badal sakta hai.
+    if (invoice.sourceOrderId && source !== "order-sync") delete summary.freightCost;
+    invoice.summary = { ...invoice.summary.toObject?.(), ...summary };
   }
 
   const directFields = [

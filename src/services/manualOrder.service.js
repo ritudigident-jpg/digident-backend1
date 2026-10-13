@@ -3367,33 +3367,65 @@ import CreditNote from "../models/manage/creditNote.model.js";
    every line item as a best-effort match. If your manual-order GST setup
    differs from that assumption, adjust buildInvoiceItemsFromOrder() below.
 ========================================================= */
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+/* ---------- ONE discount rule for order, invoice, return and refund ----------
+   order.discount is a flat rupee amount (manual discount + any store credit
+   applied at checkout) off the ORIGINAL items subtotal. It is treated as a
+   fixed ratio of every rupee of goods:
+     discountRatio  = order.discount / original items subtotal
+     return value   = price × qty × (1 − discountRatio)   (what the customer actually paid for it)
+     invoice items  = still-active items, each discounted by the same ratio
+   so at every point:  invoice total = order.grandTotal − returned value.
+   (Before, the return refunded the FULL price while the invoice put the WHOLE
+   discount on the remaining items — order, invoice, ledger and the return
+   popup each showed a different number.) */
+export const orderDiscountRatio = (order) => {
+  const original = (order.items || []).reduce((s, i) => s + Number(i.price) * Number(i.quantity), 0);
+  if (original <= 0) return 0;
+  return Math.min(Math.max(Number(order.discount) || 0, 0) / original, 1);
+};
+
+export const returnLineValue = (order, price, qty) =>
+  round2(Number(price) * Number(qty) * (1 - orderDiscountRatio(order)));
+
+export const orderReturnedValue = (order) =>
+  round2(
+    (order.returnRequests || []).reduce(
+      (sum, rr) => sum + (rr.items || []).reduce((s, it) => s + returnLineValue(order, it.price, it.quantity), 0),
+      0
+    )
+  );
+
 const buildInvoiceItemsFromOrder = (order) => {
   const activeItems = (order.items || []).filter(
     (i) => Number(i.quantity) - Number(i.returnedQuantity || 0) > 0
   );
+  const ratio = orderDiscountRatio(order);
+  const lines = activeItems.map((i) => {
+    const qty = Number(i.quantity) - Number(i.returnedQuantity || 0);
+    return { item: i, qty, gross: Number(i.price) * qty };
+  });
 
-  // order.discount is a single flat rupee amount off the whole order (this
-  // is where a manual discount OR an applied store credit both end up —
-  // see CreateOrderPage). The invoice schema only understands a
-  // per-item discountPercent, so spread that flat amount across every
-  // active item as an equivalent percentage. Without this, the invoice's
-  // own total would always equal the raw item prices and completely miss
-  // any discount/credit that was actually applied on the order.
-  const subtotal = activeItems.reduce(
-    (sum, i) => sum + Number(i.price) * (Number(i.quantity) - Number(i.returnedQuantity || 0)),
-    0
-  );
-  const discountPercent =
-    subtotal > 0 ? Math.min(100, (Math.max(Number(order.discount) || 0, 0) / subtotal) * 100) : 0;
+  // Rupee discount for the active items, split per line so the rounded line
+  // discounts add up EXACTLY to it (last line takes the paise left over) —
+  // otherwise invoice total and order grand total differ by a few paise.
+  const activeSubtotal = lines.reduce((s, l) => s + l.gross, 0);
+  const totalDiscount = round2(activeSubtotal * ratio);
+  let left = totalDiscount;
 
-  return activeItems.map((i) => ({
-    description: i.variantName ? `${i.productName} - ${i.variantName}` : i.productName,
-    qty: Number(i.quantity) - Number(i.returnedQuantity || 0),
-    price: Number(i.price), // treated as GST-inclusive by the invoice schema
-    discountPercent,
-    gstType: "IGST",
-    gstPercent: Number(order.gstPercentage) || 0,
-  }));
+  return lines.map((l, idx) => {
+    const share = idx === lines.length - 1 ? left : Math.min(round2(l.gross * ratio), left);
+    left = round2(left - share);
+    return {
+      description: l.item.variantName ? `${l.item.productName} - ${l.item.variantName}` : l.item.productName,
+      qty: l.qty,
+      price: Number(l.item.price), // treated as GST-inclusive by the invoice schema
+      discountPercent: l.gross > 0 ? Math.min(100, (share / l.gross) * 100) : 0,
+      gstType: "IGST",
+      gstPercent: Number(order.gstPercentage) || 0, // 0 stays 0 (model no longer forces 5)
+    };
+  });
 };
 
 const buildAddressString = (addr = {}) =>
@@ -3475,26 +3507,38 @@ const generateInvoiceForOrder = async (order, employee = null) => {
  * refundHistory) purely so anything still reading the order directly
  * keeps showing accurate numbers.
  */
-export const resyncInvoiceForOrder = async (order) => {
+/**
+ * keepInvoicePayments — for an order that was NOT marked paid on the order
+ * side, keep whatever cash was recorded directly on its invoice (Invoices
+ * page → Amount Paid). Pass false only when staff explicitly switch the
+ * order back to "pending" (that is a reset of the payment).
+ */
+export const resyncInvoiceForOrder = async (order, { keepInvoicePayments = true } = {}) => {
   if (!order.invoiceId) return null;
 
   const items = buildInvoiceItemsFromOrder(order);
 
-  const wasEverPaid = Boolean(order.paidAt);
-  const grossPaid = wasEverPaid ? Number(order.grandTotal || 0) : 0;
+  const inv = await Invoice.findOne({ invoiceId: order.invoiceId })
+    .select("appliedCredits summary.paidAmount")
+    .lean();
+  const creditsPaid = (inv?.appliedCredits || []).reduce((s, c) => s + Number(c.amount || 0), 0);
+  // cash recorded on the invoice itself (credit-note payments counted separately)
+  const invoiceCash = Math.max(Number(inv?.summary?.paidAmount || 0) - creditsPaid, 0);
 
-  // customer ko wapas milne wali value (settled + pending dono)
-  const totalReturnedValue = (order.returnRequests || []).reduce(
-    (sum, rr) => sum + (rr.items || []).reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0),
-    0
-  );
-  const owedBasis = order.orderStatus === "cancelled" ? Number(order.refundAmount || 0) : totalReturnedValue;
-  const refundCommitted = wasEverPaid
-    ? Math.max(owedBasis, Number(order.partialRefundAmount || 0))
-    : 0;
+  const paidOnOrder = Boolean(order.paidAt);
+  // Pehle: order "pending" ho to har resync invoice ka paidAmount 0 kar deta
+  // tha — Invoices page par record kiya payment chupchaap mit jata tha.
+  const grossPaid = paidOnOrder ? Number(order.grandTotal || 0) : keepInvoicePayments ? invoiceCash : 0;
 
-  const invForCredits = await Invoice.findOne({ invoiceId: order.invoiceId }).select("appliedCredits").lean();
-  const creditsPaid = (invForCredits?.appliedCredits || []).reduce((s, c) => s + Number(c.amount || 0), 0);
+  // customer ko wapas milne wali value (settled + pending dono). Unpaid order
+  // ka return sirf bill kam karta hai — refund kuch nahi banta.
+  const owedBasis =
+    order.orderStatus === "cancelled"
+      ? Number(order.refundAmount || 0)
+      : paidOnOrder
+      ? orderReturnedValue(order)
+      : 0;
+  const refundCommitted = grossPaid > 0 ? Math.max(owedBasis, Number(order.partialRefundAmount || 0)) : 0;
 
   const netPaid = Math.max(grossPaid - refundCommitted, 0) + creditsPaid; // cap invoice model hook karega
 
@@ -3517,7 +3561,8 @@ export const resyncInvoiceForOrder = async (order) => {
     source: "order-sync",
     data: {
       items: items.length > 0 ? items : undefined,
-      summary: { paidAmount: netPaid },
+      // shipping bhi hamesha order se — invoice par edit hua freight order se alag ho jata tha
+      summary: { paidAmount: netPaid, freightCost: Number(order.shippingCharge) || 0 },
       ...(status ? { status } : {}),
       notes: `Synced with order ${order.orderId} on ${new Date().toLocaleDateString("en-IN")}`,
       refundStatus,
@@ -3528,7 +3573,13 @@ export const resyncInvoiceForOrder = async (order) => {
   });
 
   if (!status && updated) {
-    const newStatus = Number(updated.summary?.amountToPay) <= 0 ? "paid" : "partially_paid";
+    // Pehle: kuch bhi paid na ho tab bhi "partially_paid" lag jata tha
+    const newStatus =
+      Number(updated.summary?.amountToPay) <= 0.01
+        ? "paid"
+        : Number(updated.summary?.paidAmount) > 0
+        ? "partially_paid"
+        : "issued";
     if (updated.status !== newStatus) {
       await updateInvoiceService({
         invoiceId: order.invoiceId,
@@ -3678,6 +3729,15 @@ export const createManualOrderService = async (data, currentUser) => {
   const finalDiscount = Math.max(Number(discount) || 0, 0);
   const finalShippingCharge = Math.max(Number(shippingCharge) || 0, 0);
   const finalGstAmount = Math.max(Number(gstAmount) || 0, 0);
+
+  // Discount items se zyada ho to invoice (jo 100% se zyada discount nahi
+  // de sakta) aur order ka total alag ho jate the.
+  if (finalDiscount > subtotal + 0.001) {
+    const error = new Error(`Discount (${finalDiscount}) can't be more than the items total (${subtotal})`);
+    error.statusCode = 400;
+    error.errorCode = "INVALID_DISCOUNT";
+    throw error;
+  }
 
   const grandTotal = Math.max(subtotal + finalShippingCharge + finalGstAmount - finalDiscount, 0);
   if (grandTotal <= 0) {
@@ -4046,7 +4106,8 @@ export const updateManualOrderPaymentStatusService = async (data, currentUser) =
 
   /* ---------- KEEP LINKED INVOICE IN SYNC (non-blocking) ---------- */
   try {
-    await resyncInvoiceForOrder(order);
+    // "pending" par wapas = payment reset, invoice ka paid bhi 0 (credits chhodkar)
+    await resyncInvoiceForOrder(order, { keepInvoicePayments: paymentStatus !== "pending" });
   } catch (err) {
     console.error("Invoice sync failed on manual order payment status update:", err.message);
   }
@@ -4118,6 +4179,16 @@ export const cancelManualOrderService = async (orderId, currentUser, reason) => 
   if (order.paymentStatus === "paid") {
     order.paymentStatus = "refund_pending";
     order.refundAmount = order.grandTotal;
+  } else if (order.paymentStatus === "pending" && order.invoiceId) {
+    // Order "pending" tha par Invoices page par kuch payment record hua tha —
+    // woh paisa bhi customer ko wapas dena hai.
+    const inv = await Invoice.findOne({ invoiceId: order.invoiceId }).select("summary.paidAmount appliedCredits").lean();
+    const credits = (inv?.appliedCredits || []).reduce((s, c) => s + Number(c.amount || 0), 0);
+    const cash = round2(Math.max(Number(inv?.summary?.paidAmount || 0) - credits, 0));
+    if (cash > 0) {
+      order.paymentStatus = "refund_pending";
+      order.refundAmount = cash;
+    }
   }
 
   await order.save();
@@ -4225,7 +4296,8 @@ export const createManualReturnService = async (data, currentUser) => {
     }
 
     orderItem.returnedQuantity = Number(orderItem.returnedQuantity || 0) + Number(quantity);
-    refundableAmount += Number(orderItem.price) * Number(quantity);
+    // discount ke baad jo customer ne asal mein diya — wahi wapas (ReturnOrderModal bhi yahi dikhata hai)
+    refundableAmount = round2(refundableAmount + returnLineValue(order, orderItem.price, quantity));
 
     validatedItems.push({
       productName: orderItem.productName,
@@ -4250,7 +4322,19 @@ export const createManualReturnService = async (data, currentUser) => {
   const totalReturnedQty = order.items.reduce((sum, i) => sum + Number(i.returnedQuantity || 0), 0);
   order.orderStatus = totalActiveQty === 0 && totalReturnedQty > 0 ? "returned" : "partial_returned";
 
-  if (refundNow) {
+  const wasPaid = Boolean(order.paidAt) && ["paid", "refund_pending", "partial_refunded"].includes(order.paymentStatus);
+
+  if (refundNow && !wasPaid) {
+    const error = new Error("This order hasn't been paid yet — there is nothing to refund. Record the return without a refund; the invoice total just goes down.");
+    error.statusCode = 400;
+    error.errorCode = "ORDER_NOT_PAID";
+    throw error;
+  }
+
+  if (!wasPaid) {
+    // Unpaid order: return sirf bill kam karta hai. Pehle yahan bhi
+    // "refund_pending" lag jata tha aur ledger mein company ka "owe" dikhta tha.
+  } else if (refundNow) {
     const allowedMethods = ["cash", "upi", "bank_transfer", "card", "other"];
     if (!refundMethod || !allowedMethods.includes(refundMethod)) {
       const error = new Error(`refundMethod is required and must be one of: ${allowedMethods.join(", ")}`);

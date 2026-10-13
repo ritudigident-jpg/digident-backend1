@@ -991,7 +991,11 @@ invoiceSchema.pre("save", function () {
   for (const item of this.items) {
     const qty = Math.max(0, Number(item.qty) || 0);
     const price = Math.max(0, Number(item.price) || 0);
-    const gstPercent = Math.max(0, Number(item.gstPercent) || 5);
+    // 0% GST is valid (manual order with GST 0) — pehle 0 bhi 5% ban jata tha
+    const gstPercent =
+      item.gstPercent === undefined || item.gstPercent === null || item.gstPercent === ""
+        ? 5
+        : Math.max(0, Number(item.gstPercent) || 0);
     const discPct = Math.min(100, Math.max(0, Number(item.discountPercent) || 0));
 
     // Step 1 — Gross amount (qty × GST-inclusive price)
