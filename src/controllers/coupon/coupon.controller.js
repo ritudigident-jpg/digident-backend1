@@ -1,10 +1,26 @@
-import {createCouponValidation, updateCouponValidation } from "./coupon.validator.js";
-import { handleError, sendError } from "../../helpers/error.helper.js";
-import { createCouponService, deleteCouponService, filterCouponsService, getSingleCouponService, updateCouponService } from "../../services/coupon.service.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import { getPagination } from "../../helpers/pagination.helper.js";
-import Employee from "../../models/manage/employee.model.js";
+/**
+ * HTTP handlers for discount coupons: read the request, call the service, send the response. No
+ * business logic here.
+ *
+ * Exports: createCoupon, updateCoupon, filterCouponsByStatus, getSingleCoupon, deleteCoupon
+ * Used by: routes/coupons.routes.js
+ */
 
+import { createCouponValidation, updateCouponValidation } from "./coupon.validator.js";
+
+import {
+  createCouponService,
+  deleteCouponService,
+  filterCouponsService,
+  getSingleCouponService,
+  updateCouponService,
+} from "../../services/coupon/coupon.service.js";
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import { getPagination } from "../../helpers/pagination.helper.js";
+import Employee from "../../models/employee.model.js";
+import { NotFoundError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createCoupon
@@ -27,47 +43,29 @@ import Employee from "../../models/manage/employee.model.js";
  * @response
  * 201 Coupon created successfully
  */
-export const createCoupon = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = createCouponValidation.validate(req.body, {
-      abortEarly: false
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map(e => e.message)
-      });
-    }
-     /* ---------- FETCH EMPLOYEE ---------- */
-     const employee = await Employee.findOne({
-      email: req.user.email
-    });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-    /* ---------- SERVICE ---------- */
-    const coupon = await createCouponService({
-      data: value,
-      employee, // optional
-      permission: req.permission // optional
-    });
-    return sendSuccess(
-      res,
-      coupon,
-      201,
-      "Coupon created successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const createCoupon = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = createCouponValidation.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  /* ---------- SERVICE ---------- */
+  const coupon = await createCouponService({
+    data: value,
+    employee, // optional
+    permission: req.permission, // optional
+  });
+  return sendCreated(res, { data: coupon, message: "Coupon created successfully" });
+});
 
 /**
  * @function updateCoupon
@@ -85,54 +83,33 @@ export const createCoupon = async (req, res) => {
  * @response
  * 200 Coupon updated successfully
  */
-export const updateCoupon = async (req, res) => {
-  try {
-    const { value, error } = updateCouponValidation.validate(req.body, {
-      abortEarly: false
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map(e => e.message)
-      });
-    }
-    const { id: couponId } = req.params;
-    if(!couponId){
-      return sendError(res, {
-        message: "CouponId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-
-     /* ---------- FETCH EMPLOYEE ---------- */
-        const employee = await Employee.findOne({
-          email: req.user.email
-        });
-        if (!employee) {
-          return sendError(res, {
-            message: "Employee not found",
-            statusCode: 404,
-            errorCode: "EMPLOYEE_NOT_FOUND"
-          });
-        }
-    /* ---------- SERVICE ---------- */
-    const coupon = await updateCouponService({
-      couponId,
-      data: value,employee
-    });
-    return sendSuccess(
-      res,
-      coupon,
-      200,
-      "Coupon updated successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const updateCoupon = asyncHandler(async (req, res) => {
+  const { value, error } = updateCouponValidation.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const { id: couponId } = req.params;
+  if (!couponId) {
+    throw new ValidationError("CouponId is required");
+  }
+
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  /* ---------- SERVICE ---------- */
+  const coupon = await updateCouponService({
+    couponId,
+    data: value,
+    employee,
+  });
+  return sendSuccess(res, { data: coupon, message: "Coupon updated successfully" });
+});
 
 /**
  * @function filterCouponsByStatus
@@ -168,43 +145,35 @@ export const updateCoupon = async (req, res) => {
  * }
  */
 
-export const filterCouponsByStatus = async (req, res) => {
-  try {
-    /* ---------- PAGINATION ---------- */
-    const { page, limit, skip } = getPagination(req.query);
+export const filterCouponsByStatus = asyncHandler(async (req, res) => {
+  /* ---------- PAGINATION ---------- */
+  const { page, limit, skip } = getPagination(req.query);
 
-    /* ---------- QUERY PARAM ---------- */
-   const {isActive}  = req.params;
+  /* ---------- QUERY PARAM ---------- */
+  const { isActive } = req.params;
 
-    /* ---------- SERVICE ---------- */
-    const { coupons, total } = await filterCouponsService({
-      isActive,
-      skip,
-      limit
-    });
+  /* ---------- SERVICE ---------- */
+  const { coupons, total } = await filterCouponsService({
+    isActive,
+    skip,
+    limit,
+  });
 
-    /* ---------- RESPONSE ---------- */
-    return sendSuccess(
-      res,
-      {
-        coupons, // ✅ no formatting
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalCoupons: total,
-          limit
-        },
-        status: isActive || "all"
+  /* ---------- RESPONSE ---------- */
+  return sendSuccess(res, {
+    data: {
+      coupons, // ✅ no formatting
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalCoupons: total,
+        limit,
       },
-      200,
-      "Coupons fetched successfully"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-
+      status: isActive || "all",
+    },
+    message: "Coupons fetched successfully",
+  });
+});
 
 /**
  * @function getSingleCoupon
@@ -222,31 +191,17 @@ export const filterCouponsByStatus = async (req, res) => {
  * 200 Coupon fetched successfully
  * 404 Coupon not found
  */
-export const getSingleCoupon = async (req, res) => {
-  try {
-    const { id: couponId } = req.params;
+export const getSingleCoupon = asyncHandler(async (req, res) => {
+  const { id: couponId } = req.params;
 
-    if (!couponId) {
-      return sendError(res, {
-        message: "CouponId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-
-    /* ---------- SERVICE ---------- */
-    const coupon = await getSingleCouponService({ couponId });    
-    return sendSuccess(
-      res,
-      coupon,
-      200,
-      "Coupon fetched successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+  if (!couponId) {
+    throw new ValidationError("CouponId is required");
   }
-};
 
+  /* ---------- SERVICE ---------- */
+  const coupon = await getSingleCouponService({ couponId });
+  return sendSuccess(res, { data: coupon, message: "Coupon fetched successfully" });
+});
 
 /**
  * @function deleteCoupon
@@ -263,39 +218,22 @@ export const getSingleCoupon = async (req, res) => {
  * 200 Coupon deleted successfully
  * 404 Coupon not found
  */
-export const deleteCoupon = async (req, res) => {
-  try {
-    const { id: couponId } = req.params;
+export const deleteCoupon = asyncHandler(async (req, res) => {
+  const { id: couponId } = req.params;
 
-    if (!couponId) {
-      return sendError(res, {
-        message: "CouponId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-
-        /* ---------- FETCH EMPLOYEE ---------- */
-        const employee = await Employee.findOne({
-          email: req.user.email
-        });
-        if (!employee) {
-          return sendError(res, {
-            message: "Employee not found",
-            statusCode: 404,
-            errorCode: "EMPLOYEE_NOT_FOUND"
-          });
-        }
-
-    /* ---------- SERVICE ---------- */
-    await deleteCouponService({ couponId , employee });
-    return sendSuccess(
-      res,
-      null,
-      200,
-      "Coupon deleted successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+  if (!couponId) {
+    throw new ValidationError("CouponId is required");
   }
-};
+
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  /* ---------- SERVICE ---------- */
+  await deleteCouponService({ couponId, employee });
+  return sendSuccess(res, { data: null, message: "Coupon deleted successfully" });
+});

@@ -1,0 +1,517 @@
+/**
+ * Mongoose model "Invoice": tax invoices for orders and manual sales.
+ *
+ * Used by: controllers/invoice/invoice.controller.js, helpers/invoicenumber.helper.js,
+ * helpers/linkedsync.helper.js, services/creditnote/creditnote.service.js,
+ * services/invoice/invoice.service.js, services/manualorder/manualorder.service.js
+ */
+
+import mongoose from "mongoose";
+import { v6 as uuidv6 } from "uuid";
+import { buildInvoiceSearchIndex } from "../helpers/fuzzysearch.helper.js";
+const { Schema, model } = mongoose;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CALCULATION LOGIC (GST-INCLUSIVE)
+//
+//  Given: price is GST-inclusive (MRP)
+//
+//  Step 1 — Extract base & GST from inclusive price
+//    grossAmount  = qty × price                        (e.g. 1 × 1200 = 1200)
+//    baseAmount   = grossAmount / (1 + gstPercent/100) (e.g. 1200/1.05 = 1142.86)
+//    gstOnGross   = grossAmount - baseAmount           (e.g. 57.14)
+//
+//  Step 2 — Apply discount on grossAmount (inclusive price)
+//    discountValue = grossAmount × discountPercent/100 (e.g. 1200 × 50% = 600)
+//    discountedTotal = grossAmount - discountValue     (e.g. 1200 - 600 = 600)
+//
+//  Step 3 — Re-extract base & GST from discounted total
+//    totalNet    = discountedTotal / (1 + gstPercent/100) (e.g. 600/1.05 = 571.43)
+//    gstAmount   = discountedTotal - totalNet             (e.g. 28.57)
+//    totalAmount = discountedTotal                        (e.g. 600)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const invoiceItemSchema = new Schema(
+  {
+    itemId: {
+      type: String,
+      default: () => uuidv6(),
+    },
+    articleNo: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    hsnCode: {
+      type: String,
+      trim: true,
+      default: "90212900",
+    },
+    description: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    qty: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+      // GST-inclusive price (MRP)
+    },
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    // How much of this line has already been returned — set only by
+    // createInvoiceReturnService (standalone/"Create Invoice" invoices).
+    // qty itself is never mutated so the invoice stays an accurate
+    // historical record of what was originally billed.
+    returnedQty: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // ── Computed fields (set by pre-save hook) ──────────────────────────────
+    grossAmount: {
+      // qty × price (before discount, inclusive of GST)
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    discountValue: {
+      // grossAmount × discountPercent / 100
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalNet: {
+      // base price after discount (ex-GST)
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    gstType: {
+      type: String,
+      enum: ["IGST", "CGST", "SGST", "NONE"],
+      default: "IGST",
+    },
+    gstPercent: {
+      type: Number,
+      default: 5,
+      min: 0,
+    },
+    gstAmount: {
+      // GST on discounted amount
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalAmount: {
+      // final payable = discountedTotal (inclusive of GST after discount)
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
+/* =========================================================================
+   RETURN REQUEST (standalone/"Create Invoice" invoices only)
+   One entry per return recorded directly on an invoice that has no source
+   order (sourceOrderId === null) — written only by createInvoiceReturnService
+   in invoice.service.js. A manual-order invoice's returns live on the
+   ManualOrder instead (returnRequests) and just get mirrored here; an
+   ecommerce invoice's returns live on the Order. This array exists purely
+   so a standalone invoice — which has no order behind it — has somewhere
+   to keep its own return history.
+   ========================================================================= */
+const invoiceReturnRequestSchema = new Schema(
+  {
+    requestId: { type: String, trim: true, required: true },
+    items: [
+      {
+        itemId: { type: String, trim: true, required: true },
+        description: { type: String, trim: true, default: "" },
+        quantity: { type: Number, required: true, min: 1 },
+        price: { type: Number, required: true, min: 0 },
+        reason: { type: String, trim: true, default: null },
+      },
+    ],
+    processedBy: { type: String, trim: true, default: "" }, // employee email
+    requestedAt: { type: Date, default: Date.now },
+    processedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+/* =========================================================================
+   REFUND HISTORY ENTRY
+   One entry per settlement made against this invoice's pending refund —
+   either a real payout (cash/upi/bank_transfer/card/other) or store credit
+   ("customer will take it next time", method: "credit_note"). Written only
+   by settleInvoiceRefundService in invoice.service.js — nothing else should
+   push into this array directly.
+   ========================================================================= */
+const refundHistoryEntrySchema = new Schema(
+  {
+    refundId: { type: String, trim: true, required: true },
+    amount: { type: Number, min: 0, required: true },
+    method: {
+      type: String,
+      enum: ["cash", "upi", "bank_transfer", "card", "other", "credit_note"],
+      default: "credit_note",
+    },
+    reference: { type: String, trim: true, default: null }, // payment reference, for cash-style methods
+    refundedBy: { type: String, trim: true, default: "" }, // employee email
+    refundedAt: { type: Date, default: Date.now },
+    refundStatus: { type: String, trim: true, default: "processed" },
+    // Only meaningful when method === "credit_note": which new
+    // order/invoice this credit was actually spent on.
+    appliedToOrderId: { type: String, default: null },
+    notes: { type: String, trim: true, default: null },
+    // NEW — when method === "credit_note", the CreditNote document this
+    // settlement produced (see models/manage/creditNote.model.js).
+    creditNoteId: { type: String, default: null },
+    creditNoteNumber: { type: String, default: null },
+  },
+  { _id: false }
+);
+
+const invoiceSchema = new Schema(
+  {
+    invoiceId: {
+      type: String,
+      unique: true,
+      default: () => uuidv6(),
+    },
+    invoiceNumber: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+    customerNo: {
+      type: Number,
+      required: true,
+    },
+    invoiceDate: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    dueDate: {
+      type: Date,
+      default: null,
+    },
+    orderNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    orderDate: {
+      type: Date,
+      default: null,
+    },
+    deliveryDate: {
+      type: Date,
+      default: null,
+    },
+    paymentTerms: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    termsOfDelivery: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingCondition: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    customerServiceRep: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    seller: {
+      companyName: { type: String, trim: true, default: "" },
+      address: { type: String, trim: true, default: "" },
+      gstin: { type: String, trim: true, default: "" },
+      email: { type: String, trim: true, default: "" },
+      contactNumber: { type: String, trim: true, default: "" },
+    },
+    billTo: {
+      companyName: { type: String, required: true, trim: true },
+      address: { type: String, trim: true, default: "" },
+      gstin: { type: String, trim: true, default: "" },
+      contactPerson: { type: String, trim: true, default: "" },
+      contactNumber: { type: String, trim: true, default: "" },
+    },
+    bankDetails: {
+      accountNo: { type: String, trim: true, default: "" },
+      accountType: { type: String, trim: true, default: "" },
+      ifscCode: { type: String, trim: true, default: "" },
+      holderName: { type: String, trim: true, default: "" },
+    },
+    items: {
+      type: [invoiceItemSchema],
+      default: [],
+    },
+    summary: {
+      totalGrossValue: { type: Number, default: 0 }, // sum of all grossAmounts
+      totalDiscount: { type: Number, default: 0 }, // sum of all discountValues
+      totalNet: { type: Number, default: 0 }, // sum of all totalNet (ex-GST after discount)
+      totalTax: { type: Number, default: 0 }, // sum of all gstAmounts
+      freightCost: { type: Number, default: 0 },
+      totalPayAmount: { type: Number, default: 0 }, // totalNet + totalTax + freightCost
+      paidAmount: { type: Number, default: 0 },
+      amountToPay: { type: Number, default: 0 }, // totalPayAmount - paidAmount
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    status: {
+      type: String,
+      enum: ["draft", "issued", "paid", "cancelled", "partially_paid"],
+      default: "draft",
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+
+    /* ================= LINK BACK TO SOURCE ORDER =================
+       Set once, at creation time (createInvoiceService), so a refund
+       settled on this invoice can be mirrored back onto the order it
+       came from — purely for display/legacy reads on the order side.
+       This invoice is the single source of truth for money; the order
+       never derives amounts on its own anymore. */
+    sourceOrderId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    sourceOrderType: {
+      type: String,
+      enum: ["manual", "ecommerce", null],
+      default: null,
+    },
+
+    /* ================= CRM CLIENT + CREATOR =================
+       These fields used to be missing from the schema, so Mongoose silently
+       dropped them on save (strict mode), which is why the per-agent filter
+       never worked.
+       leadId    → DentalLead (stage "client") the invoice was made for
+       createdBy → Employee (agent) who created the invoice               */
+    leadId: {
+      type: Schema.Types.ObjectId,
+      ref: "DentalLead",
+      default: null,
+      index: true,
+    },
+    clientId: {
+      // "DIGI-DENT-001": copy for display and search
+      type: String,
+      trim: true,
+      default: null,
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+      index: true,
+    },
+    createdByName: { type: String, trim: true, default: "" },
+    createdByEmail: { type: String, trim: true, lowercase: true, default: "" },
+
+    /* ================= FUZZY SEARCH INDEX =================
+       Built automatically by the pre-save hook (helpers/fuzzysearch.helper.js).
+       Never sent in API responses (select: false). */
+    searchIndex: {
+      type: {
+        _id: false,
+        text: { type: String, default: "" },
+        keys: { type: [String], default: [] },
+        grams: { type: [String], default: [] },
+        digits: { type: String, default: "" },
+      },
+      default: () => ({}),
+      select: false,
+    },
+
+    /* ================= CREDIT NOTE / REFUND SETTLEMENT =================
+       This is the ONLY place a pending refund (from a return or a
+       cancellation, on ANY order type) gets settled — either as a real
+       payout (cash/upi/bank_transfer/card/other) or as store credit
+       (method: "credit_note"). The order that caused this just reports
+       how much is currently owed (refundableAmount) via updateInvoiceService
+       whenever its own state changes (return, cancellation, ...); only
+       settleInvoiceRefundService in invoice.service.js is allowed to pay
+       that amount down and push into refundHistory. */
+    refundStatus: {
+      type: String,
+      enum: ["none", "refund_pending", "partial_refunded", "refunded"],
+      default: "none",
+    },
+    refundableAmount: {
+      // remaining amount still owed back to the customer right now
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    partialRefundAmount: {
+      // cumulative amount already settled (cash payouts + credit notes)
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    refundedAt: {
+      type: Date,
+      default: null,
+    },
+    refundHistory: {
+      type: [refundHistoryEntrySchema],
+      default: [],
+    },
+
+    /* ================= RETURNS (standalone invoices only) =================
+       Populated only by createInvoiceReturnService, only when
+       sourceOrderId is null. See invoiceReturnRequestSchema above. */
+    returns: {
+      type: [invoiceReturnRequestSchema],
+      default: [],
+    },
+
+    /* ================= CREDIT NOTES LINK =================
+       Every CreditNote raised against this invoice (manual or from a
+       return/cancellation) — same idea as order.invoiceId pointing at the
+       invoice. The CreditNote collection is the source of truth; this is
+       just a quick "does this invoice have credit notes?" index. */
+    creditNoteIds: {
+      type: [String],
+      default: [],
+    },
+
+    /* ================= CREDIT NOTES USED TO PAY THIS INVOICE =================
+       When a customer's credit note is applied to THIS (already existing,
+       unpaid) invoice, the amount counts as payment: summary.paidAmount goes
+       up by it. Kept here so resyncInvoiceForOrder (manual orders) can add it
+       back when it recomputes paidAmount from the order. Written only by
+       applyCreditNoteToInvoiceService in creditNote.service.js. */
+    appliedCredits: {
+      type: [
+        {
+          _id: false,
+          creditNoteId: { type: String, required: true },
+          creditNoteNumber: { type: String, default: null },
+          usageId: { type: String, default: null },
+          amount: { type: Number, min: 0, required: true },
+          appliedBy: { type: String, default: "" },
+          appliedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+  },
+  { timestamps: true }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PRE-SAVE HOOK — recalculate all values
+// ─────────────────────────────────────────────────────────────────────────────
+
+invoiceSchema.pre("save", function () {
+  let sumGrossAmount = 0; // total MRP before discount
+  let sumDiscount = 0; // total discount given
+  let sumNet = 0; // total base price after discount (ex-GST)
+  let sumTax = 0; // total GST after discount
+
+  for (const item of this.items) {
+    const qty = Math.max(0, Number(item.qty) || 0);
+    const price = Math.max(0, Number(item.price) || 0);
+    // 0% GST is valid (manual order with GST 0); before, 0 was turned into 5%
+    const gstPercent =
+      item.gstPercent === undefined || item.gstPercent === null || item.gstPercent === ""
+        ? 5
+        : Math.max(0, Number(item.gstPercent) || 0);
+    const discPct = Math.min(100, Math.max(0, Number(item.discountPercent) || 0));
+
+    // Step 1 — Gross amount (qty × GST-inclusive price)
+    const grossAmount = qty * price;
+
+    // Step 2 — Discount on gross amount
+    const discountValue = round2((grossAmount * discPct) / 100);
+    const discountedTotal = round2(grossAmount - discountValue);
+
+    // Step 3 — Extract base & GST from discounted total
+    const divisor = 1 + gstPercent / 100;
+    const totalNet = round2(discountedTotal / divisor);
+    const gstAmount = round2(discountedTotal - totalNet);
+
+    // Write back to item
+    item.grossAmount = round2(grossAmount);
+    item.discountValue = discountValue;
+    item.totalNet = totalNet;
+    item.gstAmount = gstAmount;
+    item.totalAmount = discountedTotal; // final payable for this line
+
+    // Accumulate summary
+    sumGrossAmount += grossAmount;
+    sumDiscount += discountValue;
+    sumNet += totalNet;
+    sumTax += gstAmount;
+  }
+
+  const freightCost = Math.max(0, Number(this.summary.freightCost) || 0);
+
+  this.summary.totalGrossValue = round2(sumGrossAmount);
+  this.summary.totalDiscount = round2(sumDiscount);
+  this.summary.totalNet = round2(sumNet);
+  this.summary.totalTax = round2(sumTax);
+  this.summary.totalPayAmount = round2(sumNet + sumTax + freightCost);
+
+  // paidAmount never above totalPayAmount, amountToPay never negative
+  const paid = Math.max(Number(this.summary.paidAmount) || 0, 0);
+  this.summary.paidAmount = Math.min(paid, this.summary.totalPayAmount);
+  this.summary.amountToPay = Math.max(round2(this.summary.totalPayAmount - this.summary.paidAmount), 0);
+
+  if (!["draft", "cancelled"].includes(this.status) && this.summary.totalPayAmount > 0) {
+    if (this.summary.paidAmount >= this.summary.totalPayAmount - 0.01) {
+      this.status = "paid";
+    } else if (this.summary.paidAmount > 0 && this.status === "issued") {
+      this.status = "partially_paid";
+    }
+  }
+
+  // fuzzy search index — har save par fresh (name/phone/number badle to bhi)
+  this.searchIndex = buildInvoiceSearchIndex(this);
+});
+
+/* ─── Indexes ───────────────────────────────────────────────────────────────
+   List page ke filters + fuzzy search candidates fast rahen (1000+ invoices) */
+invoiceSchema.index({ isDeleted: 1, createdAt: -1 });
+invoiceSchema.index({ isDeleted: 1, sourceOrderType: 1, createdAt: -1 });
+invoiceSchema.index({ isDeleted: 1, createdBy: 1, createdAt: -1 });
+invoiceSchema.index({ isDeleted: 1, leadId: 1, createdAt: -1 });
+invoiceSchema.index({ "searchIndex.keys": 1 });
+invoiceSchema.index({ "searchIndex.grams": 1 });
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+const Invoice = model("Invoice", invoiceSchema);
+export default Invoice;

@@ -1,9 +1,23 @@
-import { handleError, sendError } from "../../helpers/error.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import { createCategoryService, deleteCategoryService, getAllCategoriesService, updateCategoryService } from "../../services/category.service.js";
-import { createCategoryValidator, updateCategoryValidator } from "./category.validator.js";
-import Employee from "../../models/manage/employee.model.js";
+/**
+ * HTTP handlers for product categories: read the request, call the service, send the response. No
+ * business logic here.
+ *
+ * Exports: createCategory, updateCategory, deleteCategory, getAllCategories
+ * Used by: routes/categories.routes.js
+ */
 
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import {
+  createCategoryService,
+  deleteCategoryService,
+  getAllCategoriesService,
+  updateCategoryService,
+} from "../../services/category/category.service.js";
+import { createCategoryValidator, updateCategoryValidator } from "./category.validator.js";
+import Employee from "../../models/employee.model.js";
+import { NotFoundError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createCategory
@@ -25,57 +39,33 @@ import Employee from "../../models/manage/employee.model.js";
  * @response
  * 201 { success: true, message: "Category created successfully", data: category }
  */
-export const createCategory = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = createCategoryValidator.validate(req.body, {
-      abortEarly: false
-    });
-    if (error){
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map(e => e.message)
-      });
-    }
-    const { name, permission } = value;
-    if (!req.file) {
-      return sendError(res, {
-        message: "Image file is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-    const result = await createCategoryService({
-      name,
-      file: req.file,
-      employee,
-      permission
-    });
-    return sendSuccess(
-      res,
-      result,
-      201,
-      "Category created successfully"
-    );
-  } catch (error) {
-    console.error("Create Category Error:", error);
-    return handleError(res, error);
+export const createCategory = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = createCategoryValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
-
+  const { name, permission } = value;
+  if (!req.file) {
+    throw new ValidationError("Image file is required");
+  }
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  const result = await createCategoryService({
+    name,
+    file: req.file,
+    employee,
+    permission,
+  });
+  return sendCreated(res, { data: result, message: "Category created successfully" });
+});
 
 /**
  * @function updateCategory
@@ -100,64 +90,36 @@ export const createCategory = async (req, res) => {
  * @response
  * 200 { success: true, message: "Category updated successfully", data: category }
  */
-export const updateCategory = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = updateCategoryValidator.validate(req.body, {
-      abortEarly: false
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map(e => e.message)
-      });
-    }
-    const { name, permission } = value;
-    const { categoryId } = req.params;
-    if (!categoryId) {
-      return sendError(res, {
-        message: "CategoryId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-    const result = await updateCategoryService({
-      categoryId,
-      name,
-      file: req.file,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Category updated successfully"
-    );
-
-  } catch (error) {
-
-    console.error("Update Category Error:", error);
-
-    return handleError(res, error);
-
+export const updateCategory = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = updateCategoryValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const { name, permission } = value;
+  const { categoryId } = req.params;
+  if (!categoryId) {
+    throw new ValidationError("CategoryId is required");
+  }
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  const result = await updateCategoryService({
+    categoryId,
+    name,
+    file: req.file,
+    employee,
+    permission,
+  });
 
+  return sendSuccess(res, { data: result, message: "Category updated successfully" });
+});
 
 /**
  * @function deleteCategory
@@ -179,54 +141,31 @@ export const updateCategory = async (req, res) => {
  * @response
  * 200 { success: true, message: "Category deleted successfully" }
  */
-export const deleteCategory = async (req, res) => {
-  try {
-    const { categoryId } = req.params;
-    const { permission } = req.body;
+export const deleteCategory = asyncHandler(async (req, res) => {
+  const { categoryId } = req.params;
+  const { permission } = req.body;
 
-    if (!categoryId) {
-      return sendError(res, {
-        message: "CategoryId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    await deleteCategoryService({
-      categoryId,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      null,
-      200,
-      "Category deleted successfully"
-    );
-
-  } catch (error) {
-
-    console.error("Delete Category Error:", error);
-
-    return handleError(res, error);
-
+  if (!categoryId) {
+    throw new ValidationError("CategoryId is required");
   }
-};
 
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  await deleteCategoryService({
+    categoryId,
+    employee,
+    permission,
+  });
+
+  return sendSuccess(res, { data: null, message: "Category deleted successfully" });
+});
 
 /**
  * @function getAllCategories
@@ -259,17 +198,7 @@ export const deleteCategory = async (req, res) => {
  *   }
  * }
  */
-export const getAllCategories = async (req, res) => {
-  try {
-    const result = await getAllCategoriesService();
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Categories fetched successfully"
-    );
-  } catch (error) {
-    console.error("Get Categories Error:", error);
-    return handleError(res, error);
-  }
-};
+export const getAllCategories = asyncHandler(async (req, res) => {
+  const result = await getAllCategoriesService();
+  return sendSuccess(res, { data: result, message: "Categories fetched successfully" });
+});

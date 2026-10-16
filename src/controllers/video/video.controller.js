@@ -1,7 +1,23 @@
-import { addVideoService, deleteVideoService, getVideoByIdService, getYTDocService, updateVideoService } from "../../services/video.service.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import { handleError, sendError } from "../../helpers/error.helper.js";
+/**
+ * HTTP handlers for YouTube videos shown on the website: read the request, call the service, send
+ * the response. No business logic here.
+ *
+ * Exports: getAllVideos, addVideo, updateVideo, getVideoById, deleteVideo
+ * Used by: routes/videos.routes.js
+ */
+
+import {
+  addVideoService,
+  deleteVideoService,
+  getVideoByIdService,
+  getYTDocService,
+  updateVideoService,
+} from "../../services/video/video.service.js";
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+
 import { validateAddVideoBody, validateUpdateVideo } from "./video.validator.js";
+import { ValidationError } from "../../helpers/apperror.helper.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function getYTDoc
@@ -42,19 +58,15 @@ import { validateAddVideoBody, validateUpdateVideo } from "./video.validator.js"
 /* =========================================================
    GET ALL VIDEOS
 ========================================================= */
-export const getAllVideos = async (req, res) => {
-  try {
-    const page  = Math.max(Number(req.query.page)  || 1,  1);
-    const limit = Math.max(Number(req.query.limit) || 10, 1);
-    const skip  = (page - 1) * limit;
+export const getAllVideos = asyncHandler(async (req, res) => {
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const limit = Math.max(Number(req.query.limit) || 10, 1);
+  const skip = (page - 1) * limit;
 
-    const result = await getYTDocService({ page, limit, skip });
+  const result = await getYTDocService({ page, limit, skip });
 
-    return sendSuccess(res, result, 200, "YouTube videos fetched successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "YouTube videos fetched successfully" });
+});
 
 /**
  * @function addVideo
@@ -95,27 +107,18 @@ export const getAllVideos = async (req, res) => {
  * }
  */
 
-export const addVideo = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = validateAddVideoBody(req.body);
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    /* ---------- SERVICE ---------- */
-    const result = await addVideoService({ ...value, userEmail: req.user.email });
-
-    return sendSuccess(res, result, 201, "Video added successfully");
-  } catch (error) {
-    return handleError(res, error);
+export const addVideo = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = validateAddVideoBody(req.body);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+
+  /* ---------- SERVICE ---------- */
+  const result = await addVideoService({ ...value, userEmail: req.user.email });
+
+  return sendCreated(res, { data: result, message: "Video added successfully" });
+});
 
 /**
  * @function updateVideo
@@ -151,30 +154,21 @@ export const addVideo = async (req, res) => {
  * }
  */
 
-export const updateVideo = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = validateUpdateVideo({
-      ytVideoId: req.params.ytVideoId,
-      ...req.body,
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    /* ---------- SERVICE ---------- */
-    const result = await updateVideoService({ ...value, userEmail: req.user.email });
-
-    return sendSuccess(res, result, 200, "Video updated successfully");
-  } catch (error) {
-    return handleError(res, error);
+export const updateVideo = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = validateUpdateVideo({
+    ytVideoId: req.params.ytVideoId,
+    ...req.body,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+
+  /* ---------- SERVICE ---------- */
+  const result = await updateVideoService({ ...value, userEmail: req.user.email });
+
+  return sendSuccess(res, { data: result, message: "Video updated successfully" });
+});
 
 /**
  * @function getVideoById
@@ -196,25 +190,17 @@ export const updateVideo = async (req, res) => {
  * }
  */
 
-export const getVideoById = async (req, res) => {
-  try {
-    const { ytVideoId } = req.params;
+export const getVideoById = asyncHandler(async (req, res) => {
+  const { ytVideoId } = req.params;
 
-    if (!ytVideoId) {
-      return sendError(res, {
-        message: "ytVideoId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-
-    const result = await getVideoByIdService({ ytVideoId });
-
-    return sendSuccess(res, result, 200, "Video fetched successfully");
-  } catch (error) {
-    return handleError(res, error);
+  if (!ytVideoId) {
+    throw new ValidationError("ytVideoId is required");
   }
-};
+
+  const result = await getVideoByIdService({ ytVideoId });
+
+  return sendSuccess(res, { data: result, message: "Video fetched successfully" });
+});
 
 /**
  * @function deleteVideo
@@ -243,27 +229,19 @@ export const getVideoById = async (req, res) => {
  * }
  */
 
-export const deleteVideo = async (req, res) => {
-  try {
-    const { ytVideoId } = req.params;
-    const { permission } = req.body;
+export const deleteVideo = asyncHandler(async (req, res) => {
+  const { ytVideoId } = req.params;
+  const { permission } = req.body;
 
-    if (!ytVideoId) {
-      return sendError(res, {
-        message: "ytVideoId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-
-    const result = await deleteVideoService({
-      ytVideoId,
-      permission,
-      userEmail: req.user.email,
-    });
-
-    return sendSuccess(res, result, 200, "Video deleted successfully");
-  } catch (error) {
-    return handleError(res, error);
+  if (!ytVideoId) {
+    throw new ValidationError("ytVideoId is required");
   }
-};
+
+  const result = await deleteVideoService({
+    ytVideoId,
+    permission,
+    userEmail: req.user.email,
+  });
+
+  return sendSuccess(res, { data: result, message: "Video deleted successfully" });
+});

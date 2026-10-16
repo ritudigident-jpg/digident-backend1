@@ -1,3 +1,11 @@
+/**
+ * File upload settings (multer): general uploads and Excel imports.
+ *
+ * Exports: uploadExcel
+ * Used by: 8 files, e.g. routes/banners.routes.js, routes/blogs.routes.js,
+ * routes/brands.routes.js, routes/careers.routes.js
+ */
+
 import multer from "multer";
 
 /**
@@ -22,21 +30,20 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-export default upload
+export default upload;
 
 export const uploadExcel = multer({
-  storage: multer.memoryStorage(),          // file lives at req.file.buffer
-  limits:  { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  storage: multer.memoryStorage(), // file lives at req.file.buffer
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
 
   fileFilter: (_req, file, cb) => {
     const allowed = [
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-      "application/vnd.ms-excel",                                           // .xls
-      "text/csv",                                                           // .csv
+      "application/vnd.ms-excel", // .xls
+      "text/csv", // .csv
       "application/csv",
     ];
     if (allowed.includes(file.mimetype)) return cb(null, true);
     cb(new Error("Only .xlsx, .xls or .csv files are accepted"), false);
   },
 });
-

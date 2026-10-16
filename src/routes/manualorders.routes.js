@@ -1,0 +1,41 @@
+/**
+ * Routes for orders typed in by staff (phone / walk-in sales). Mounted at /api/v1/manual-order (10
+ * endpoints, listed in docs/ENDPOINTS.md).
+ *
+ * Used by: app.js
+ */
+
+import express from "express";
+import {
+  createManualOrder,
+  getManualOrder,
+  getAllManualOrders,
+  updateManualOrderStatus,
+  updateManualOrderPaymentStatus,
+  cancelManualOrder,
+  createManualReturn,
+  updateManualOrderCourier,
+  getManualOrderAnalytics,
+  getCustomerBalanceLedger,
+} from "../controllers/manualorder/manualorder.controller.js";
+import auth from "../middlewares/auth.middleware.js";
+import { checkPermission } from "../middlewares/permission.middleware.js";
+
+const router = express.Router();
+
+router.post("/create", auth, checkPermission, createManualOrder);
+router.get("/get/all/:permission", auth, checkPermission, getAllManualOrders);
+router.get("/analytics/:permission", auth, checkPermission, getManualOrderAnalytics);
+router.get("/ledger/:permission", auth, checkPermission, getCustomerBalanceLedger);
+router.get("/get/:orderId/:permission", auth, checkPermission, getManualOrder);
+router.patch("/status/:orderId", auth, checkPermission, updateManualOrderStatus);
+router.patch("/payment-status/:orderId", auth, checkPermission, updateManualOrderPaymentStatus);
+router.put("/cancel/:orderId", auth, checkPermission, cancelManualOrder);
+router.put("/courier/:orderId", auth, checkPermission, updateManualOrderCourier);
+router.post("/return", auth, checkPermission, createManualReturn);
+
+// NOTE: credit note settlement moved to invoice routes —
+//   PUT /api/invoice/manage/credit-settle/:invoiceId
+//   GET /api/invoice/manage/credit-notes/:permission
+
+export default router;

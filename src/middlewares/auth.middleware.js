@@ -1,3 +1,9 @@
+/**
+ * Checks the Bearer access token (ACCESS_TOKEN_SECRET) and puts { id, email } on req.user.
+ *
+ * Used by: 21 files, e.g. routes/addresses.routes.js, routes/attendance.routes.js,
+ * routes/banners.routes.js, routes/blogs.routes.js
+ */
 
 /**
  * @function authToken
@@ -20,59 +26,47 @@
  * 401 { success: false, message: "Unauthorized access" } - for other errors
  */
 import jwt from "jsonwebtoken";
-import { sendError, handleError } from "../helpers/error.helper.js";
+import { ERROR_CODES } from "../constants/errorcodes.constant.js";
+import { UnauthorizedError } from "../helpers/apperror.helper.js";
+import { asyncHandler } from "../helpers/asynchandler.helper.js";
 
-const authToken = async (req, res, next) => {
-  try {
-    /* =========================
+const authToken = asyncHandler(async (req, res, next) => {
+  /* =========================
        CHECK AUTH HEADER
     ========================= */
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return sendError(res, {
-        message: "Authorization token missing",
-        statusCode: 401,
-        errorCode: "AUTH_HEADER_MISSING",
-      });
-    }
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new UnauthorizedError("Authorization token missing", { code: ERROR_CODES.AUTH_HEADER_MISSING });
+  }
 
-    /* =========================
+  /* =========================
        EXTRACT TOKEN
     ========================= */
-    const token = authHeader.split(" ")[1];
+  const token = authHeader.split(" ")[1];
 
-    /* =========================
+  /* =========================
        VERIFY TOKEN
     ========================= */
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-    } catch (err) {
-      if (err.name === "TokenExpiredError") {
-        throw new Error("TOKEN_EXPIRED");
-      }
-      if (err.name === "JsonWebTokenError") {
-        throw new Error("INVALID_TOKEN");
-      }
-      throw err;
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+  } catch (err) {
+    if (err.name === "TokenExpiredError") {
+      throw new UnauthorizedError("Token expired", { code: ERROR_CODES.TOKEN_EXPIRED });
     }
+    if (err.name === "JsonWebTokenError") {
+      throw new UnauthorizedError("Invalid token", { code: ERROR_CODES.INVALID_TOKEN });
+    }
+    throw err;
+  }
 
-    /* =========================
+  /* =========================
        ATTACH USER
     ========================= */
-    req.user = {
-      id: decoded.id,
-      email: decoded.email,
-    };
-    next();
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  req.user = {
+    id: decoded.id,
+    email: decoded.email,
+  };
+  next();
+});
 export default authToken;
-
-
-
-
-
-  

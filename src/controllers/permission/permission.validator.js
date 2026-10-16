@@ -1,3 +1,11 @@
+/**
+ * Joi schemas for permission definitions and assigning them to employees: request bodies are
+ * checked against these before the service runs.
+ *
+ * Exports: validatePermissionBody, validateAssignPermissionBody
+ * Used by: controllers/permission/permission.controller.js
+ */
+
 import Joi from "joi";
 
 export const validatePermissionBody = (data) => {
@@ -7,8 +15,6 @@ export const validatePermissionBody = (data) => {
 
   return schema.validate(data, { abortEarly: false });
 };
-
-
 
 export const validateAssignPermissionBody = (data) => {
   const schema = Joi.object({

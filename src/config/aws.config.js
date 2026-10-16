@@ -1,6 +1,11 @@
+/**
+ * S3 client and bucket settings from the AWS_* environment variables.
+ *
+ * Exports: awsConfig, s3Client
+ * Used by: services/aws/aws.service.js
+ */
+
 import { S3Client } from "@aws-sdk/client-s3";
-import dotenv from "dotenv";
-dotenv.config();
 export const awsConfig = {
   bucket: process.env.AWS_S3_BUCKET,
   region: process.env.AWS_REGION,
@@ -12,6 +17,6 @@ export const s3Client = new S3Client({
   region: awsConfig.region,
   credentials: {
     accessKeyId: awsConfig.accessKeyId,
-    secretAccessKey: awsConfig.secretAccessKey
-  }
+    secretAccessKey: awsConfig.secretAccessKey,
+  },
 });

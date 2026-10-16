@@ -1,9 +1,14 @@
-import {
-  validateCreateTestimonialBody,
-  validateUpdateTestimonialBody,
-} from "./testimonial.validation.js";
-import { sendError, handleError } from "../../helpers/error.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
+/**
+ * HTTP handlers for customer testimonials shown on the website: read the request, call the
+ * service, send the response. No business logic here.
+ *
+ * Exports: createTestimonial, getAllTestimonials, getTestimonialById, updateTestimonial,
+ * deleteTestimonial
+ * Used by: routes/testimonials.routes.js
+ */
+
+import { validateCreateTestimonialBody, validateUpdateTestimonialBody } from "./testimonial.validator.js";
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
 import { getPagination } from "../../helpers/pagination.helper.js";
 import {
   createTestimonialService,
@@ -11,19 +16,9 @@ import {
   getTestimonialByIdService,
   updateTestimonialService,
   deleteTestimonialService,
-} from "../../services/testimonial.service.js";
-
-/* ---------- Route known service errors (statusCode set) to sendError ---------- */
-const respondError = (res, error) => {
-  if (error?.statusCode) {
-    return sendError(res, {
-      message: error.message,
-      statusCode: error.statusCode,
-      errorCode: error.errorCode || "ERROR",
-    });
-  }
-  return handleError(res, error);
-};
+} from "../../services/testimonial/testimonial.service.js";
+import { ValidationError } from "../../helpers/apperror.helper.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createTestimonial
@@ -32,26 +27,17 @@ const respondError = (res, error) => {
  * 201 { success: true, message: "Testimonial created successfully", data: testimonial }
  * 400 { success: false, message: "Validation failed", details: [...] }
  */
-export const createTestimonial = async (req, res) => {
-  try {
-    const { value, error } = validateCreateTestimonialBody(req.body);
+export const createTestimonial = asyncHandler(async (req, res) => {
+  const { value, error } = validateCreateTestimonialBody(req.body);
 
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    const testimonial = await createTestimonialService({ data: value });
-
-    return sendSuccess(res, testimonial, 201, "Testimonial created successfully");
-  } catch (error) {
-    return respondError(res, error);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+
+  const testimonial = await createTestimonialService({ data: value });
+
+  return sendCreated(res, { data: testimonial, message: "Testimonial created successfully" });
+});
 
 /**
  * @function getAllTestimonials
@@ -60,27 +46,23 @@ export const createTestimonial = async (req, res) => {
  * @response
  * 200 { success: true, message: "Testimonials fetched successfully", data: { testimonials, pagination } }
  */
-export const getAllTestimonials = async (req, res) => {
-  try {
-    const { page, limit, skip } = getPagination(req.query);
+export const getAllTestimonials = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query);
 
-    let isActive;
-    if (req.query.isActive === "true") isActive = true;
-    else if (req.query.isActive === "false") isActive = false;
+  let isActive;
+  if (req.query.isActive === "true") isActive = true;
+  else if (req.query.isActive === "false") isActive = false;
 
-    const result = await getAllTestimonialsService({
-      page,
-      limit,
-      skip,
-      isActive,
-      search: req.query.search,
-    });
+  const result = await getAllTestimonialsService({
+    page,
+    limit,
+    skip,
+    isActive,
+    search: req.query.search,
+  });
 
-    return sendSuccess(res, result, 200, "Testimonials fetched successfully");
-  } catch (error) {
-    return respondError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "Testimonials fetched successfully" });
+});
 
 /**
  * @function getTestimonialById
@@ -89,17 +71,13 @@ export const getAllTestimonials = async (req, res) => {
  * 200 { success: true, message: "Testimonial fetched successfully", data: testimonial }
  * 404 { success: false, message: "Testimonial not found" }
  */
-export const getTestimonialById = async (req, res) => {
-  try {
-    const { testimonialId } = req.params;
+export const getTestimonialById = asyncHandler(async (req, res) => {
+  const { testimonialId } = req.params;
 
-    const testimonial = await getTestimonialByIdService({ testimonialId });
+  const testimonial = await getTestimonialByIdService({ testimonialId });
 
-    return sendSuccess(res, testimonial, 200, "Testimonial fetched successfully");
-  } catch (error) {
-    return respondError(res, error);
-  }
-};
+  return sendSuccess(res, { data: testimonial, message: "Testimonial fetched successfully" });
+});
 
 /**
  * @function updateTestimonial
@@ -109,30 +87,21 @@ export const getTestimonialById = async (req, res) => {
  * 400 { success: false, message: "Validation failed", details: [...] }
  * 404 { success: false, message: "Testimonial not found" }
  */
-export const updateTestimonial = async (req, res) => {
-  try {
-    const { testimonialId } = req.params;
-    const { value, error } = validateUpdateTestimonialBody(req.body);
+export const updateTestimonial = asyncHandler(async (req, res) => {
+  const { testimonialId } = req.params;
+  const { value, error } = validateUpdateTestimonialBody(req.body);
 
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    const testimonial = await updateTestimonialService({
-      testimonialId,
-      data: value,
-    });
-
-    return sendSuccess(res, testimonial, 200, "Testimonial updated successfully");
-  } catch (error) {
-    return respondError(res, error);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+
+  const testimonial = await updateTestimonialService({
+    testimonialId,
+    data: value,
+  });
+
+  return sendSuccess(res, { data: testimonial, message: "Testimonial updated successfully" });
+});
 
 /**
  * @function deleteTestimonial
@@ -141,14 +110,10 @@ export const updateTestimonial = async (req, res) => {
  * 200 { success: true, message: "Testimonial deleted successfully" }
  * 404 { success: false, message: "Testimonial not found" }
  */
-export const deleteTestimonial = async (req, res) => {
-  try {
-    const { testimonialId } = req.params;
+export const deleteTestimonial = asyncHandler(async (req, res) => {
+  const { testimonialId } = req.params;
 
-    await deleteTestimonialService({ testimonialId });
+  await deleteTestimonialService({ testimonialId });
 
-    return sendSuccess(res, null, 200, "Testimonial deleted successfully");
-  } catch (error) {
-    return respondError(res, error);
-  }
-};
+  return sendSuccess(res, { data: null, message: "Testimonial deleted successfully" });
+});

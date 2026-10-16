@@ -1,3 +1,11 @@
+/**
+ * Joi schemas for discount coupons: request bodies are checked against these before the service
+ * runs.
+ *
+ * Exports: createCouponValidation, updateCouponValidation, couponValidator
+ * Used by: controllers/coupon/coupon.controller.js
+ */
+
 import Joi from "joi";
 
 /* ============================
@@ -18,21 +26,15 @@ const buyXGetYSchema = Joi.object({
 /* ============================
    CREATE VALIDATION
 ============================ */
-export const createCouponValidation = Joi.object({  
-  permission:Joi.string().required(),
+export const createCouponValidation = Joi.object({
+  permission: Joi.string().required(),
   title: Joi.string().min(3).required(),
   code: Joi.string().min(3).required(),
 
   description: Joi.string().allow("").optional(),
 
   couponType: Joi.string()
-    .valid(
-      "PERCENT",
-      "FIXED",
-      "FREESHIP",
-      "BUY_X_GET_Y_FREE",
-      "BUY_X_GET_Y_DISCOUNT"
-    )
+    .valid("PERCENT", "FIXED", "FREESHIP", "BUY_X_GET_Y_FREE", "BUY_X_GET_Y_DISCOUNT")
     .required(),
 
   discountValue: Joi.when("couponType", {
@@ -49,9 +51,7 @@ export const createCouponValidation = Joi.object({
 
   isActive: Joi.boolean().optional(),
 
-  applicableTo: Joi.string()
-    .valid("ALL", "PRODUCT", "BRAND", "CATEGORY")
-    .required(),
+  applicableTo: Joi.string().valid("ALL", "PRODUCT", "BRAND", "CATEGORY").required(),
 
   applicableProducts: Joi.array().items(Joi.string()).optional(),
   applicableBrands: Joi.array().items(Joi.string()).optional(),
@@ -72,21 +72,15 @@ export const updateCouponValidation = createCouponValidation.fork(
   (field) => field.optional()
 );
 
-
-
 // validators/coupon.validator.js
 
 export const couponValidator = Joi.object({
   code: Joi.string().required(),
   title: Joi.string().required(),
 
-  couponType: Joi.string().valid(
-    "PERCENT",
-    "FIXED",
-    "FREESHIP",
-    "BUY_X_GET_Y_FREE",
-    "BUY_X_GET_Y_DISCOUNT"
-  ).required(),
+  couponType: Joi.string()
+    .valid("PERCENT", "FIXED", "FREESHIP", "BUY_X_GET_Y_FREE", "BUY_X_GET_Y_DISCOUNT")
+    .required(),
 
   discountValue: Joi.number().min(0),
 
@@ -97,12 +91,7 @@ export const couponValidator = Joi.object({
   startDate: Joi.date().required(),
   endDate: Joi.date().greater(Joi.ref("startDate")).required(),
 
-  applicableTo: Joi.string().valid(
-    "ALL",
-    "PRODUCT",
-    "BRAND",
-    "CATEGORY"
-  ).required(),
+  applicableTo: Joi.string().valid("ALL", "PRODUCT", "BRAND", "CATEGORY").required(),
 
   applicableProducts: Joi.array().items(Joi.string()),
   applicableBrands: Joi.array().items(Joi.string()),
@@ -122,8 +111,8 @@ export const couponValidator = Joi.object({
     getBrand: Joi.string(),
 
     buyCategory: Joi.string(),
-    getCategory: Joi.string()
+    getCategory: Joi.string(),
   }).optional(),
 
-  permission: Joi.string().optional()
+  permission: Joi.string().optional(),
 });

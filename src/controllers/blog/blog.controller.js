@@ -1,3 +1,11 @@
+/**
+ * HTTP handlers for blog posts, comments and SEO data: read the request, call the service, send
+ * the response. No business logic here.
+ *
+ * Exports: createBlog, getBlogs, getBlogById, getBlogBySlug, updateBlog, deleteBlog
+ * Used by: routes/blogs.routes.js
+ */
+
 import {
   createBlogService,
   getBlogsService,
@@ -5,17 +13,17 @@ import {
   getBlogBySlugService,
   updateBlogService,
   deleteBlogService,
-} from "../../services/blog.service.js";
+} from "../../services/blog/blog.service.js";
 
-import {
-  createBlogValidator,
-  updateBlogValidator,
-} from "./blog.validator.js";
+import { createBlogValidator, updateBlogValidator } from "./blog.validator.js";
 
-import Employee from "../../models/manage/employee.model.js";
-import { sendError, handleError } from "../../helpers/error.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
+import Employee from "../../models/employee.model.js";
+
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
 import { getPagination } from "../../helpers/pagination.helper.js";
+import { NotFoundError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createBlog
@@ -39,39 +47,27 @@ import { getPagination } from "../../helpers/pagination.helper.js";
  * @response
  * 201 { success: true, message: "Blog created successfully", data: blog }
  */
-export const createBlog = async (req, res) => {
-  try {
-    const featuredImage =  req.files?.featuredImage?.[0]
-    const { value, error } = createBlogValidator.validate(req.body, {
-      abortEarly: false,
-      stripUnknown: true,
-    });
-   
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((e) => e.message),
-      });
-    }
-    const employee = await Employee.findOne({ email: req.user.email });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND",
-      });
-    }
-    const blog = await createBlogService({
-      data: value,featuredImage,
-      employee,
-    });
-    return sendSuccess(res, blog, 201, "Blog created successfully");
-  } catch (error) {
-    return handleError(res, error);
+export const createBlog = asyncHandler(async (req, res) => {
+  const featuredImage = req.files?.featuredImage?.[0];
+  const { value, error } = createBlogValidator.validate(req.body, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const employee = await Employee.findOne({ email: req.user.email });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  const blog = await createBlogService({
+    data: value,
+    featuredImage,
+    employee,
+  });
+  return sendCreated(res, { data: blog, message: "Blog created successfully" });
+});
 
 /**
  * @function getBlogs
@@ -100,24 +96,20 @@ export const createBlog = async (req, res) => {
  *   }
  * }
  */
-export const getBlogs = async (req, res) => {
-  try {
-    const { page, limit, skip } = getPagination(req.query);
+export const getBlogs = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query);
 
-    const result = await getBlogsService({
-      page,
-      limit,
-      skip,
-      status: req.query.status,
-      search: req.query.search,
-      category: req.query.category,
-    });
+  const result = await getBlogsService({
+    page,
+    limit,
+    skip,
+    status: req.query.status,
+    search: req.query.search,
+    category: req.query.category,
+  });
 
-    return sendSuccess(res, result, 200, "Blogs fetched successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "Blogs fetched successfully" });
+});
 
 /**
  * @function getBlogById
@@ -137,17 +129,13 @@ export const getBlogs = async (req, res) => {
  *   data: blog
  * }
  */
-export const getBlogById = async (req, res) => {
-  try {
-    const blog = await getBlogByIdService({
-      blogId: req.params.blogId,
-    });
+export const getBlogById = asyncHandler(async (req, res) => {
+  const blog = await getBlogByIdService({
+    blogId: req.params.blogId,
+  });
 
-    return sendSuccess(res, blog, 200, "Blog fetched successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: blog, message: "Blog fetched successfully" });
+});
 
 /**
  * @function getBlogBySlug
@@ -167,17 +155,13 @@ export const getBlogById = async (req, res) => {
  *   data: blog
  * }
  */
-export const getBlogBySlug = async (req, res) => {
-  try {
-    const blog = await getBlogBySlugService({
-      slug: req.params.slug,
-    });
+export const getBlogBySlug = asyncHandler(async (req, res) => {
+  const blog = await getBlogBySlugService({
+    slug: req.params.slug,
+  });
 
-    return sendSuccess(res, blog, 200, "Blog fetched successfully");
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: blog, message: "Blog fetched successfully" });
+});
 
 /**
  * @function updateBlog
@@ -208,39 +192,27 @@ export const getBlogBySlug = async (req, res) => {
  *   data: blog
  * }
  */
-export const updateBlog = async (req, res) => {
-  try {
-    const featuredImage = req.files?.featuredImage?.[0];
-    const { value, error } = updateBlogValidator.validate(req.body, {
-      abortEarly: false,
-      stripUnknown: true,
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((e) => e.message),
-      });
-    }
-    const employee = await Employee.findOne({ email: req.user.email });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND",
-      });
-    }
-    const blog = await updateBlogService({
-      blogId: req.params.blogId,
-      data: value,featuredImage,
-      employee,
-    });
-    return sendSuccess(res, blog, 200, "Blog updated successfully");
-  } catch (error) {
-    return handleError(res, error);
+export const updateBlog = asyncHandler(async (req, res) => {
+  const featuredImage = req.files?.featuredImage?.[0];
+  const { value, error } = updateBlogValidator.validate(req.body, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const employee = await Employee.findOne({ email: req.user.email });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  const blog = await updateBlogService({
+    blogId: req.params.blogId,
+    data: value,
+    featuredImage,
+    employee,
+  });
+  return sendSuccess(res, { data: blog, message: "Blog updated successfully" });
+});
 
 /**
  * @function deleteBlog
@@ -260,25 +232,17 @@ export const updateBlog = async (req, res) => {
  *   message: "Blog deleted successfully"
  * }
  */
-export const deleteBlog = async (req, res) => {
-  try {
-    const employee = await Employee.findOne({ email: req.user.email });
+export const deleteBlog = asyncHandler(async (req, res) => {
+  const employee = await Employee.findOne({ email: req.user.email });
 
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND",
-      });
-    }
-
-    const result = await deleteBlogService({
-      blogId: req.params.blogId,
-      employee,
-    });
-
-    return sendSuccess(res, result, 200, "Blog deleted successfully");
-  } catch (error) {
-    return handleError(res, error);
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
   }
-};
+
+  const result = await deleteBlogService({
+    blogId: req.params.blogId,
+    employee,
+  });
+
+  return sendSuccess(res, { data: result, message: "Blog deleted successfully" });
+});

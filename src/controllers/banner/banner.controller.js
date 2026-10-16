@@ -1,9 +1,28 @@
-import { handleError, sendError } from "../../helpers/error.helper.js";
+/**
+ * HTTP handlers for homepage banners of the shop and website: read the request, call the service,
+ * send the response. No business logic here.
+ *
+ * Exports: createBanner, getProductsByBanner, getAllBanners, updateBanner,
+ * updateBannerDisplayOrder, deleteBanner, getBannersByIsActive
+ * Used by: routes/banners.routes.js
+ */
+
 import { getPagination } from "../../helpers/pagination.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import Employee from "../../models/manage/employee.model.js";
-import { createBannerService, deleteBannerService, getAllBannersService, getBannersByIsActiveService, getProductsByBannerService, updateBannerDisplayOrderService, updateBannerService } from "../../services/banner.service.js";
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import Employee from "../../models/employee.model.js";
+import {
+  createBannerService,
+  deleteBannerService,
+  getAllBannersService,
+  getBannersByIsActiveService,
+  getProductsByBannerService,
+  updateBannerDisplayOrderService,
+  updateBannerService,
+} from "../../services/banner/banner.service.js";
 import { createBannerValidator } from "./banner.validator.js";
+import { NotFoundError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createBanner
@@ -30,62 +49,37 @@ import { createBannerValidator } from "./banner.validator.js";
  * @response
  * 201 { success: true, message: "Banner created successfully", data: banner }
  */
-export const createBanner = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = createBannerValidator.validate(req.body,{
-      abortEarly: false
-    });
-    if(error){
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map(e => e.message)
-      });
-    }
-    const { filterBy, filterId, isActive, displayOrder, permission } = value;
-    if (!req.file) {
-      return sendError(res, {
-        message: "Banner image is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-    const result = await createBannerService({
-      filterBy,
-      filterId,
-      isActive,
-      displayOrder,
-      file: req.file,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      result,
-      201,
-      "Banner created successfully"
-    );
-
-  } catch (error) {
-    console.error("Create Banner Error:", error);
-    return handleError(res, error);
+export const createBanner = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = createBannerValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const { filterBy, filterId, isActive, displayOrder, permission } = value;
+  if (!req.file) {
+    throw new ValidationError("Banner image is required");
+  }
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  const result = await createBannerService({
+    filterBy,
+    filterId,
+    isActive,
+    displayOrder,
+    file: req.file,
+    employee,
+    permission,
+  });
 
+  return sendCreated(res, { data: result, message: "Banner created successfully" });
+});
 
 /**
  * @function getProductsByBanner
@@ -110,34 +104,19 @@ export const createBanner = async (req, res) => {
  * @response
  * 200 { success: true, message: "Products fetched by banner", data: { products, pagination } }
  */
-export const getProductsByBanner = async (req, res) => {
-  try {
-    const { bannerId } = req.params;
-    if (!bannerId){
-      return sendError(res, {
-        message: "BannerId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    const { page, limit } = getPagination(req.query);
-    const result = await getProductsByBannerService({
-      bannerId,
-      page,
-      limit
-    });
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Products fetched by banner"
-    );
-  } catch (error) {
-    console.error("Get Products By Banner Error:", error);
-    return handleError(res, error);
+export const getProductsByBanner = asyncHandler(async (req, res) => {
+  const { bannerId } = req.params;
+  if (!bannerId) {
+    throw new ValidationError("BannerId is required");
   }
-};
-
+  const { page, limit } = getPagination(req.query);
+  const result = await getProductsByBannerService({
+    bannerId,
+    page,
+    limit,
+  });
+  return sendSuccess(res, { data: result, message: "Products fetched by banner" });
+});
 
 /**
  * @function getAllBanners
@@ -171,25 +150,14 @@ export const getProductsByBanner = async (req, res) => {
  *   }
  * }
  */
-export const getAllBanners = async (req, res) => {
-  try {
-    const { page, limit} = getPagination(req.query);
-    const result = await getAllBannersService({
-      page,
-      limit,
-    });
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Banners fetched successfully"
-    );
-  }catch (error) {
-    console.error("Get Banners Error:", error);
-    return handleError(res, error);
-  }
-};
-
+export const getAllBanners = asyncHandler(async (req, res) => {
+  const { page, limit } = getPagination(req.query);
+  const result = await getAllBannersService({
+    page,
+    limit,
+  });
+  return sendSuccess(res, { data: result, message: "Banners fetched successfully" });
+});
 
 /**
  * @function updateBanner
@@ -221,53 +189,35 @@ export const getAllBanners = async (req, res) => {
  * @response
  * 200 { success: true, message: "Banner updated successfully", data: banner }
  */
-export const updateBanner = async (req, res) => {
-  try {
-    const { bannerId } = req.params;
-    const { filterBy, filterId, isActive, displayOrder, permission } = req.body;
+export const updateBanner = asyncHandler(async (req, res) => {
+  const { bannerId } = req.params;
+  const { filterBy, filterId, isActive, displayOrder, permission } = req.body;
 
-    if (!bannerId) {
-      return sendError(res, {
-        message: "BannerId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    const result = await updateBannerService({
-      bannerId,
-      filterBy,
-      filterId,
-      isActive,
-      displayOrder,
-      file: req.file,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Banner updated successfully"
-    );
-  } catch (error) {
-    console.error("Update Banner Error:", error);
-    return handleError(res, error);
+  if (!bannerId) {
+    throw new ValidationError("BannerId is required");
   }
-};
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  const result = await updateBannerService({
+    bannerId,
+    filterBy,
+    filterId,
+    isActive,
+    displayOrder,
+    file: req.file,
+    employee,
+    permission,
+  });
+
+  return sendSuccess(res, { data: result, message: "Banner updated successfully" });
+});
 
 /**
  * @function updateBannerDisplayOrder
@@ -293,55 +243,32 @@ export const updateBanner = async (req, res) => {
  * @response
  * 200 { success: true, message: "Display order updated successfully", data: banner }
  */
-export const updateBannerDisplayOrder = async (req, res) => {
-  try {
-    const { bannerId } = req.params;
-    const { displayOrder, permission } = req.body;
-    if (!bannerId){
-      return sendError(res, {
-        message: "BannerId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    if (!displayOrder || displayOrder < 1) {
-      return sendError(res, {
-        message: "displayOrder must be >= 1",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    const result = await updateBannerDisplayOrderService({
-      bannerId,
-      displayOrder,
-      employee,
-      permission
-    });
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Display order updated successfully"
-    );
-  } catch (error) {
-    console.error("Update Banner Order Error:", error);
-    return handleError(res, error);
+export const updateBannerDisplayOrder = asyncHandler(async (req, res) => {
+  const { bannerId } = req.params;
+  const { displayOrder, permission } = req.body;
+  if (!bannerId) {
+    throw new ValidationError("BannerId is required");
   }
-};
+  if (!displayOrder || displayOrder < 1) {
+    throw new ValidationError("displayOrder must be >= 1");
+  }
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
 
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  const result = await updateBannerDisplayOrderService({
+    bannerId,
+    displayOrder,
+    employee,
+    permission,
+  });
+  return sendSuccess(res, { data: result, message: "Display order updated successfully" });
+});
 
 /**
  * @function deleteBanner
@@ -365,49 +292,29 @@ export const updateBannerDisplayOrder = async (req, res) => {
  * @response
  * 200 { success: true, message: "Banner deleted successfully" }
  */
-export const deleteBanner = async (req, res) => {
-  try {
-    const { bannerId } = req.params;
-    const { permission } = req.body;
-    if (!bannerId) {
-      return sendError(res, {
-        message: "BannerId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    await deleteBannerService({
-      bannerId,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      null,
-      200,
-      "Banner deleted successfully"
-    );
-
-  } catch (error) {
-    console.error("Delete Banner Error:", error);
-    return handleError(res, error);
+export const deleteBanner = asyncHandler(async (req, res) => {
+  const { bannerId } = req.params;
+  const { permission } = req.body;
+  if (!bannerId) {
+    throw new ValidationError("BannerId is required");
   }
-};
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
 
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  await deleteBannerService({
+    bannerId,
+    employee,
+    permission,
+  });
+
+  return sendSuccess(res, { data: null, message: "Banner deleted successfully" });
+});
 
 /**
  * @function getBannersByIsActive
@@ -430,42 +337,22 @@ export const deleteBanner = async (req, res) => {
  * @response
  * 200 { success: true, message: "Banners fetched successfully", data: { banners, pagination } }
  */
-export const getBannersByIsActive = async (req, res) => {
-  try{
-    const { isActive } = req.query;
-    if (isActive === undefined){
-      return sendError(res, {
-        message: "isActive query param is required (true | false)",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- CONVERT TO BOOLEAN ---------- */
-    const isActiveBool =
-      isActive === "true" ? true :
-      isActive === "false" ? false : null;
-    if (isActiveBool === null) {
-      return sendError(res, {
-        message: "isActive must be true or false",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    const { page, limit, skip } = getPagination(req.query);
-    const result = await getBannersByIsActiveService({
-      isActive: isActiveBool,
-      page,
-      limit,
-      skip
-    });
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Banners fetched successfully"
-    );
-  }catch (error) {
-    console.error("Get Banners By Status Error:", error);
-    return handleError(res, error);
+export const getBannersByIsActive = asyncHandler(async (req, res) => {
+  const { isActive } = req.query;
+  if (isActive === undefined) {
+    throw new ValidationError("isActive query param is required (true | false)");
   }
-};
+  /* ---------- CONVERT TO BOOLEAN ---------- */
+  const isActiveBool = isActive === "true" ? true : isActive === "false" ? false : null;
+  if (isActiveBool === null) {
+    throw new ValidationError("isActive must be true or false");
+  }
+  const { page, limit, skip } = getPagination(req.query);
+  const result = await getBannersByIsActiveService({
+    isActive: isActiveBool,
+    page,
+    limit,
+    skip,
+  });
+  return sendSuccess(res, { data: result, message: "Banners fetched successfully" });
+});

@@ -1,3 +1,11 @@
+/**
+ * Joi schemas for product categories: request bodies are checked against these before the service
+ * runs.
+ *
+ * Exports: createCategoryValidator, updateCategoryValidator
+ * Used by: controllers/category/category.controller.js
+ */
+
 // validators/category.validator.js
 
 import Joi from "joi";
@@ -6,43 +14,26 @@ import Joi from "joi";
    CREATE CATEGORY VALIDATOR
 ============================ */
 export const createCategoryValidator = Joi.object({
-  name: Joi.string()
-    .trim()
-    .min(2)
-    .max(100)
-    .required()
-    .messages({
-      "string.empty": "Category name is required",
-      "string.min": "Category name must be at least 2 characters",
-      "any.required": "Category name is required",
-    }),
+  name: Joi.string().trim().min(2).max(100).required().messages({
+    "string.empty": "Category name is required",
+    "string.min": "Category name must be at least 2 characters",
+    "any.required": "Category name is required",
+  }),
 
-  permission: Joi.string()
-    .trim()
-    .optional()
-    .messages({
-      "string.base": "Permission must be a string",
-    }),
+  permission: Joi.string().trim().optional().messages({
+    "string.base": "Permission must be a string",
+  }),
 });
-
 
 /* ============================
    UPDATE CATEGORY VALIDATOR
 ============================ */
 export const updateCategoryValidator = Joi.object({
-  name: Joi.string()
-    .trim()
-    .min(2)
-    .max(100)
-    .optional()
-    .messages({
-      "string.min": "Category name must be at least 2 characters",
-    }),
+  name: Joi.string().trim().min(2).max(100).optional().messages({
+    "string.min": "Category name must be at least 2 characters",
+  }),
 
-  permission: Joi.string()
-    .trim()
-    .optional()
-    .messages({
-      "string.base": "Permission must be a string",
-    }),
+  permission: Joi.string().trim().optional().messages({
+    "string.base": "Permission must be a string",
+  }),
 });
