@@ -1,7 +1,15 @@
+/**
+ * Joi schemas for tax invoices for orders and manual sales: request bodies are checked against
+ * these before the service runs.
+ *
+ * Exports: createInvoiceValidator
+ * Used by: controllers/invoice/invoice.controller.js
+ */
+
 import Joi from "joi";
 const invoiceItemValidator = Joi.object({
   articleNo: Joi.string().trim().allow("").optional(),
-   hsnCode: Joi.string().trim().allow("").default("90212900"),
+  hsnCode: Joi.string().trim().allow("").default("90212900"),
   description: Joi.string().trim().required(),
   qty: Joi.number().min(1).required(),
   price: Joi.number().min(0).required(),
@@ -20,7 +28,7 @@ export const createInvoiceValidator = Joi.object({
   customerServiceRep: Joi.string().trim().allow("").optional(),
   orderDate: Joi.date().allow(null).optional(),
   deliveryDate: Joi.date().allow(null).optional(),
-  dueDate:Joi.date().allow(null).optional(),
+  dueDate: Joi.date().allow(null).optional(),
   billTo: Joi.object({
     companyName: Joi.string().trim().required(),
     address: Joi.string().trim().allow("").optional(),

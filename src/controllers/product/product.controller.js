@@ -1,14 +1,34 @@
-import { handleError, sendError } from "../../helpers/error.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import {getPagination} from "../../helpers/pagination.helper.js"
-import { addProductService, deleteProductService, duplicateProductService, getBestSellerProductsService, getProductByIdService, getProductsByStatusService, updateProductService, updateProductStockService } from "../../services/product.service.js";
-import { ApiResponse } from "../../helpers/apiResponce.js";
+/**
+ * HTTP handlers for products, variants, stock and images: read the request, call the service, send
+ * the response. No business logic here.
+ *
+ * Exports: addProduct, updateProduct, getProductsByStatus, getProductById, getBestSellerProducts,
+ * deleteProduct, updateProductStock, duplicateProduct
+ * Used by: routes/products.routes.js
+ */
+
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import { getPagination } from "../../helpers/pagination.helper.js";
+import {
+  addProductService,
+  deleteProductService,
+  duplicateProductService,
+  getBestSellerProductsService,
+  getProductByIdService,
+  getProductsByStatusService,
+  updateProductService,
+  updateProductStockService,
+} from "../../services/product/product.service.js";
+
 import {
   validateProductBody,
   validateProductFiles,
   validateUpdateProductBody,
   validateUpdateProductFiles,
 } from "./product.validator.js";
+import { BadRequestError, UnauthorizedError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 /**
  * @function addProduct
  *
@@ -136,53 +156,35 @@ import {
  * - Images are uploaded externally and stored as URLs
  * - File upload uses multipart/form-data
  */
-export const addProduct = async (req, res) => {
-  try {
-    /* ---------- VALIDATE BODY ---------- */
-    const { value, error } = validateProductBody(req.body);
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-    /* ---------- AUTH CHECK ---------- */
-    if (!req.user) {
-      return sendError(res, {
-        message: "Unauthorized",
-        statusCode: 401,
-        errorCode: "UNAUTHORIZED",
-      });
-    }
-    /* ---------- VALIDATE FILES ---------- */
-    try {
-      validateProductFiles(value, req.files);
-    } catch (fileError) {
-      return sendError(res, {
-        message: fileError.message || "Invalid files",
-        statusCode: 400,
-        errorCode: "FILE_VALIDATION_ERROR",
-      });
-    }
-    /* ---------- SERVICE ---------- */
-    const product = await addProductService({
-      body: value,
-      files: req.files,
-      user: req.user,
-    });
-    /* ---------- SUCCESS ---------- */
-    return sendSuccess(
-      res,
-      { productId: product.productId },
-      201,
-      "Product added successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const addProduct = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATE BODY ---------- */
+  const { value, error } = validateProductBody(req.body);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  /* ---------- AUTH CHECK ---------- */
+  if (!req.user) {
+    throw new UnauthorizedError("Unauthorized", { code: ERROR_CODES.UNAUTHORIZED });
+  }
+  /* ---------- VALIDATE FILES ---------- */
+  try {
+    validateProductFiles(value, req.files);
+  } catch (fileError) {
+    throw new BadRequestError(fileError.message || "Invalid files", {
+      code: ERROR_CODES.FILE_VALIDATION_ERROR,
+      details: fileError.details,
+      cause: fileError,
+    });
+  }
+  /* ---------- SERVICE ---------- */
+  const product = await addProductService({
+    body: value,
+    files: req.files,
+    user: req.user,
+  });
+  /* ---------- SUCCESS ---------- */
+  return sendCreated(res, { data: { productId: product.productId }, message: "Product added successfully" });
+});
 
 /**
  * @function updateProduct
@@ -360,33 +362,27 @@ export const addProduct = async (req, res) => {
  *
  * - Audit log is created for tracking updates
  */
-export const updateProduct = async (req, res) => {
-  try {
-    const { productId } = req.params;
-    /* ---------- VALIDATE BODY ---------- */
-    const { value, error } = validateUpdateProductBody(req.body);
-    if (error) {
-      return sendError(res, error);
-    }
-    /* ---------- VALIDATE FILES ---------- */
-    validateUpdateProductFiles(value, req.files);
-    /* ---------- SERVICE ---------- */
-    const product = await updateProductService({
-      productId,
-      body: value,
-      files: req.files,
-      user: req.user,
-    });
-    return sendSuccess(
-      res,
-      { productId: product.productId },
-      200,
-      "Product updated successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const updateProduct = asyncHandler(async (req, res) => {
+  const { productId } = req.params;
+  /* ---------- VALIDATE BODY ---------- */
+  const { value, error } = validateUpdateProductBody(req.body);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  /* ---------- VALIDATE FILES ---------- */
+  validateUpdateProductFiles(value, req.files);
+  /* ---------- SERVICE ---------- */
+  const product = await updateProductService({
+    productId,
+    body: value,
+    files: req.files,
+    user: req.user,
+  });
+  return sendSuccess(res, {
+    data: { productId: product.productId },
+    message: "Product updated successfully",
+  });
+});
 
 /**
  * @function getProductsByStatus
@@ -444,101 +440,87 @@ export const updateProduct = async (req, res) => {
  * - populate fetches minimal fields
  * - safe sorting (whitelisted fields)
  */
-export const getProductsByStatus = async (req, res) => {
-  try {
-    /* ---------------- PAGINATION ---------------- */
-    const pagination = getPagination(req.query);
+export const getProductsByStatus = asyncHandler(async (req, res) => {
+  /* ---------------- PAGINATION ---------------- */
+  const pagination = getPagination(req.query);
 
-    /* ---------------- QUERY PARAMS ---------------- */
-    const {
+  /* ---------------- QUERY PARAMS ---------------- */
+  const {
+    search,
+    category,
+    brand,
+    minPrice,
+    maxPrice,
+    status = req.params.status || "all",
+    sortBy = "createdAt",
+    sortOrder = "desc",
+  } = req.query;
+
+  /* ---------------- VALIDATION ---------------- */
+  const allowedStatus = ["active", "draft", "all"];
+  if (!allowedStatus.includes(status)) {
+    throw new BadRequestError("Invalid status value", { code: ERROR_CODES.INVALID_STATUS });
+  }
+
+  const allowedSortFields = ["name", "price", "createdAt"];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+
+  const safeSortOrder = sortOrder === "asc" ? "asc" : "desc";
+
+  /* ---------------- SERVICE CALL ---------------- */
+  const result = await getProductsByStatusService({
+    pagination,
+    filters: {
       search,
       category,
       brand,
       minPrice,
       maxPrice,
-      status = req.params.status || "all",
-      sortBy = "createdAt",
-      sortOrder = "desc",
-    } = req.query;
+      status,
+      sortBy: safeSortBy,
+      sortOrder: safeSortOrder,
+    },
+  });
 
-    /* ---------------- VALIDATION ---------------- */
-    const allowedStatus = ["active", "draft", "all"];
-    if (!allowedStatus.includes(status)) {
-      return sendError(res, {
-        message: "Invalid status value",
-        statusCode: 400,
-        errorCode: "INVALID_STATUS",
-      });
-    }
+  const { products, totalProducts } = result;
 
-    const allowedSortFields = ["name", "price", "createdAt"];
-    const safeSortBy = allowedSortFields.includes(sortBy)
-      ? sortBy
-      : "createdAt";
+  const totalPages = Math.ceil(totalProducts / pagination.limit);
+  const currentPage = pagination.page;
 
-    const safeSortOrder = sortOrder === "asc" ? "asc" : "desc";
-
-    /* ---------------- SERVICE CALL ---------------- */
-    const result = await getProductsByStatusService({
-      pagination,
-      filters: {
-        search,
-        category,
-        brand,
-        minPrice,
-        maxPrice,
-        status,
-        sortBy: safeSortBy,
-        sortOrder: safeSortOrder,
-      },
-    });
-
-    const { products, totalProducts } = result;
-
-    const totalPages = Math.ceil(totalProducts / pagination.limit);
-    const currentPage = pagination.page;
-
-    /* ---------------- PAGE OVERFLOW ---------------- */
-    if (totalPages > 0 && currentPage > totalPages) {
-      return sendSuccess(
-        res,
-        {
-          pagination: {
-            totalItems: totalProducts,
-            totalPages,
-            currentPage,
-            nextPage: null,
-            prevPage: totalPages,
-            limit: pagination.limit,
-          },
-          products: [],
-        },
-        200,
-        "Page out of range"
-      );
-    }
-
-    /* ---------------- SUCCESS ---------------- */
-    return sendSuccess(
-      res,
-      {
+  /* ---------------- PAGE OVERFLOW ---------------- */
+  if (totalPages > 0 && currentPage > totalPages) {
+    return sendSuccess(res, {
+      data: {
         pagination: {
           totalItems: totalProducts,
           totalPages,
           currentPage,
-          nextPage: currentPage < totalPages ? currentPage + 1 : null,
-          prevPage: currentPage > 1 ? currentPage - 1 : null,
+          nextPage: null,
+          prevPage: totalPages,
           limit: pagination.limit,
         },
-        products,
+        products: [],
       },
-      200,
-      "Products fetched successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+      message: "Page out of range",
+    });
   }
-};
+
+  /* ---------------- SUCCESS ---------------- */
+  return sendSuccess(res, {
+    data: {
+      pagination: {
+        totalItems: totalProducts,
+        totalPages,
+        currentPage,
+        nextPage: currentPage < totalPages ? currentPage + 1 : null,
+        prevPage: currentPage > 1 ? currentPage - 1 : null,
+        limit: pagination.limit,
+      },
+      products,
+    },
+    message: "Products fetched successfully",
+  });
+});
 
 /**
  * @function getProductById
@@ -562,32 +544,19 @@ export const getProductsByStatus = async (req, res) => {
  *   data: { ...product }
  * }
  */
-export const getProductById = async (req, res) => {
-  try {
-    const { productId } = req.params;
+export const getProductById = asyncHandler(async (req, res) => {
+  const { productId } = req.params;
 
-    /* ---------------- VALIDATION ---------------- */
-    if (!productId) {
-      return sendError(res, {
-        message: "productId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-
-    /* ---------------- SERVICE CALL ---------------- */
-    const product = await getProductByIdService(productId);
-    /* ---------------- SUCCESS ---------------- */
-    return sendSuccess(
-      res,
-      product,
-      200,
-      "Product fetched successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+  /* ---------------- VALIDATION ---------------- */
+  if (!productId) {
+    throw new ValidationError("productId is required");
   }
-};
+
+  /* ---------------- SERVICE CALL ---------------- */
+  const product = await getProductByIdService(productId);
+  /* ---------------- SUCCESS ---------------- */
+  return sendSuccess(res, { data: product, message: "Product fetched successfully" });
+});
 
 /**
  * @function getBestSellerProducts
@@ -612,21 +581,12 @@ export const getProductById = async (req, res) => {
  *   data: [ ...products ]
  * }
  */
-export const getBestSellerProducts = async (req, res) => {
-  try {
-    /* ---------------- SERVICE CALL ---------------- */
-    const products = await getBestSellerProductsService();
-    /* ---------------- SUCCESS ---------------- */
-    return sendSuccess(
-      res,
-      products,
-      200,
-      "Best selling products fetched successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+export const getBestSellerProducts = asyncHandler(async (req, res) => {
+  /* ---------------- SERVICE CALL ---------------- */
+  const products = await getBestSellerProductsService();
+  /* ---------------- SUCCESS ---------------- */
+  return sendSuccess(res, { data: products, message: "Best selling products fetched successfully" });
+});
 
 /**
  * @function deleteProduct
@@ -654,35 +614,22 @@ export const getBestSellerProducts = async (req, res) => {
  *   data: { ...product }
  * }
  */
-export const deleteProduct = async (req, res) => {
-  try {
-    const { productId } = req.params;
-    const { permission} = req.body;
-    /* ---------------- VALIDATION ---------------- */
-    if (!productId) {
-      return sendError(res, {
-        message: "productId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-    /* ---------------- SERVICE CALL ---------------- */
-    const result = await deleteProductService({
-      productId,
-      userEmail: req.user?.email,
-      permission,
-    });
-    /* ---------------- SUCCESS ---------------- */
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Product deleted successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const deleteProduct = asyncHandler(async (req, res) => {
+  const { productId } = req.params;
+  const { permission } = req.body;
+  /* ---------------- VALIDATION ---------------- */
+  if (!productId) {
+    throw new ValidationError("productId is required");
   }
-};
+  /* ---------------- SERVICE CALL ---------------- */
+  const result = await deleteProductService({
+    productId,
+    userEmail: req.user?.email,
+    permission,
+  });
+  /* ---------------- SUCCESS ---------------- */
+  return sendSuccess(res, { data: result, message: "Product deleted successfully" });
+});
 
 /**
  * @function updateProductStock
@@ -717,28 +664,18 @@ export const deleteProduct = async (req, res) => {
  *   data: { ...product }
  * }
  */
-export const updateProductStock = async (req, res) => {
-  try {
-    const result = await updateProductStockService({
-      productId: req.params.productId,
-      userEmail: req.user?.email,
-      stockType: req.body.stockType,
-      productStock: req.body.productStock,
-      variantStocks: req.body.variantStocks,
-      permission: req.body.permission,
-    });
+export const updateProductStock = asyncHandler(async (req, res) => {
+  const result = await updateProductStockService({
+    productId: req.params.productId,
+    userEmail: req.user?.email,
+    stockType: req.body.stockType,
+    productStock: req.body.productStock,
+    variantStocks: req.body.variantStocks,
+    permission: req.body.permission,
+  });
 
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Stock updated successfully"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "Stock updated successfully" });
+});
 
 /**
  * @function duplicateProduct
@@ -773,22 +710,12 @@ export const updateProductStock = async (req, res) => {
  * - Unique IDs prevent collisions
  * - Audit ensures traceability
  */
-export const duplicateProduct = async (req, res) => {
-  try {
-    const result = await duplicateProductService({
-      productId: req.body.productId,
-      userEmail: req.user?.email,
-      permission: req.body.permission,
-    });
+export const duplicateProduct = asyncHandler(async (req, res) => {
+  const result = await duplicateProductService({
+    productId: req.body.productId,
+    userEmail: req.user?.email,
+    permission: req.body.permission,
+  });
 
-    return sendSuccess(
-      res,
-      result,
-      201,
-      "Product duplicated successfully"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendCreated(res, { data: result, message: "Product duplicated successfully" });
+});

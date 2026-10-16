@@ -1,3 +1,11 @@
+/**
+ * Joi schemas for blog posts, comments and SEO data: request bodies are checked against these
+ * before the service runs.
+ *
+ * Exports: createBlogValidator, updateBlogValidator
+ * Used by: controllers/blog/blog.controller.js
+ */
+
 import Joi from "joi";
 
 export const createBlogValidator = Joi.object({
@@ -11,7 +19,7 @@ export const createBlogValidator = Joi.object({
   metaDescription: Joi.string().trim().optional().allow(""),
   keywords: Joi.array().items(Joi.string()).default([]),
   status: Joi.string().valid("draft", "published").default("draft"),
-  permission:Joi.string().required(),
+  permission: Joi.string().required(),
 });
 export const updateBlogValidator = Joi.object({
   title: Joi.string().trim().optional(),
@@ -24,5 +32,5 @@ export const updateBlogValidator = Joi.object({
   metaDescription: Joi.string().trim().optional().allow(""),
   keywords: Joi.array().items(Joi.string()).optional(),
   status: Joi.string().valid("draft", "published").optional(),
-  permission:Joi.string().required(),
+  permission: Joi.string().required(),
 });

@@ -1,7 +1,24 @@
-import { handleError, sendError } from "../../helpers/error.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import {addAddressService,  updateAddressService, clearAllAddressesService, deleteAddressService, getDefaultAddressService, setDefaultAddressService } from "../../services/address.service.js";
+/**
+ * HTTP handlers for a shop customer's saved delivery addresses: read the request, call the
+ * service, send the response. No business logic here.
+ *
+ * Exports: addAddress, updateAddress, getAllAddresses, deleteAddress, clearAllAddresses,
+ * getDefaultAddress, setDefaultAddress
+ * Used by: routes/addresses.routes.js
+ */
+
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import {
+  addAddressService,
+  updateAddressService,
+  clearAllAddressesService,
+  deleteAddressService,
+  getDefaultAddressService,
+  setDefaultAddressService,
+} from "../../services/address/address.service.js";
 import { addAddressValidator } from "./address.validator.js";
+import { ValidationError } from "../../helpers/apperror.helper.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function addAddress
@@ -43,32 +60,17 @@ import { addAddressValidator } from "./address.validator.js";
  * 409 - ADDRESS_ALREADY_EXISTS
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const addAddress = async (req, res) => {
-  try{
-    const user = req.currentUser;
-    const { value, error } = addAddressValidator.validate(req.body, {
-      abortEarly: false
-    });
-    if(error){
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message)
-      });
-    }
-    const result = await addAddressService(user, value);
-    return sendSuccess(
-      res,
-      result,
-      201,
-      "Address added successfully"
-    );
-  } catch (error) {
-    console.error("Add Address Error:", error);
-    return handleError(res, error);
+export const addAddress = asyncHandler(async (req, res) => {
+  const user = req.currentUser;
+  const { value, error } = addAddressValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const result = await addAddressService(user, value);
+  return sendCreated(res, { data: result, message: "Address added successfully" });
+});
 
 /**
  * @function updateAddress
@@ -113,40 +115,21 @@ export const addAddress = async (req, res) => {
  * 404 - ADDRESS_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const updateAddress = async (req, res) => {
-  try {
-    const user = req.currentUser;
-    const { addressId } = req.params;
-    if (!addressId) {
-      return sendError(res, {
-        message: "AddressId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    const { value, error } = addAddressValidator.validate(req.body, {
-      abortEarly: false
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message)
-      });
-    }
-    const result = await updateAddressService(user, addressId, value);
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Address updated successfully"
-    );
-  } catch (error) {
-    console.error("Update Address Error:", error);
-    return handleError(res, error);
+export const updateAddress = asyncHandler(async (req, res) => {
+  const user = req.currentUser;
+  const { addressId } = req.params;
+  if (!addressId) {
+    throw new ValidationError("AddressId is required");
   }
-};
+  const { value, error } = addAddressValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
+  }
+  const result = await updateAddressService(user, addressId, value);
+  return sendSuccess(res, { data: result, message: "Address updated successfully" });
+});
 
 /**
  * @function getAllAddresses
@@ -168,22 +151,11 @@ export const updateAddress = async (req, res) => {
  * @errors
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const getAllAddresses = async (req, res) => {
-  try {
-    const user = req.currentUser;
-    const address = user?.address;
-    return sendSuccess(
-      res,  
-      address,
-      200,
-      "Addresses fetched successfully"
-    );
-
-  } catch (error) {
-    console.error("Get Addresses Error:", error);
-    return handleError(res, error);
-  }
-};
+export const getAllAddresses = asyncHandler(async (req, res) => {
+  const user = req.currentUser;
+  const address = user?.address;
+  return sendSuccess(res, { data: address, message: "Addresses fetched successfully" });
+});
 
 /**
  * @function deleteAddress
@@ -216,29 +188,15 @@ export const getAllAddresses = async (req, res) => {
  * 404 - ADDRESS_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const deleteAddress = async (req, res) => {
-  try {
-    const { addressId } = req.params;
-    const user = req.currentUser;
-    if (!addressId) {
-      return sendError(res, {
-        message: "AddressId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    const result = await deleteAddressService(user, addressId);
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Address deleted successfully"
-    );
-  } catch (error) {
-    console.error("Delete Address Error:", error);
-    return handleError(res, error);
+export const deleteAddress = asyncHandler(async (req, res) => {
+  const { addressId } = req.params;
+  const user = req.currentUser;
+  if (!addressId) {
+    throw new ValidationError("AddressId is required");
   }
-};
+  const result = await deleteAddressService(user, addressId);
+  return sendSuccess(res, { data: result, message: "Address deleted successfully" });
+});
 
 /**
  * @function clearAllAddresses
@@ -262,23 +220,14 @@ export const deleteAddress = async (req, res) => {
  * 404 - USER_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const clearAllAddresses = async (req, res) => {
-  try {
-    const user = req.currentUser;
-    const result = await clearAllAddressesService(user);
-    return sendSuccess(
-      res,
-      result,
-      200,
-      result.length === 0
-        ? "No address to clear"
-        : "All address cleared successfully"
-    );
-  } catch (error) {
-    console.error("Clear Address Error:", error);
-    return handleError(res, error);
-  }
-};
+export const clearAllAddresses = asyncHandler(async (req, res) => {
+  const user = req.currentUser;
+  const result = await clearAllAddressesService(user);
+  return sendSuccess(res, {
+    data: result,
+    message: result.length === 0 ? "No address to clear" : "All address cleared successfully",
+  });
+});
 
 /**
  * @function getDefaultAddress
@@ -305,21 +254,11 @@ export const clearAllAddresses = async (req, res) => {
  * 404 - DEFAULT_ADDRESS_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const getDefaultAddress = async (req, res) => {
-  try {
-    const user = req.currentUser;
-    const result = await getDefaultAddressService(user);
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Default address fetched successfully"
-    );
-  } catch (error) {
-    console.error("Get Default Address Error:", error);
-    return handleError(res, error);
-  }
-};
+export const getDefaultAddress = asyncHandler(async (req, res) => {
+  const user = req.currentUser;
+  const result = await getDefaultAddressService(user);
+  return sendSuccess(res, { data: result, message: "Default address fetched successfully" });
+});
 
 /**
  * @function setDefaultAddress
@@ -356,30 +295,13 @@ export const getDefaultAddress = async (req, res) => {
  * 404 - ADDRESS_NOT_FOUND
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const setDefaultAddress = async (req, res) => {
-  try {
-    const user = req.currentUser;
-    const { addressId } = req.params;
-    // ✅ Basic validation (controller level)
-    if (!addressId) {
-      return sendError(res, {
-        message: "AddressId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    const result = await setDefaultAddressService(user, addressId);
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Default address updated successfully"
-    );
-  } catch (error) {
-    console.error("Set Default Address Error:", error);
-    return handleError(res, error);
+export const setDefaultAddress = asyncHandler(async (req, res) => {
+  const user = req.currentUser;
+  const { addressId } = req.params;
+  // ✅ Basic validation (controller level)
+  if (!addressId) {
+    throw new ValidationError("AddressId is required");
   }
-};
-
-
-
+  const result = await setDefaultAddressService(user, addressId);
+  return sendSuccess(res, { data: result, message: "Default address updated successfully" });
+});

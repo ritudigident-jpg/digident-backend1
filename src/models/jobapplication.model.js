@@ -1,0 +1,300 @@
+/**
+ * Mongoose model "JobApplication": job applications with resume upload.
+ *
+ * Used by: controllers/jobapplication/jobapplication.controller.js,
+ * services/jobapplication/jobapplication.service.js
+ */
+
+import mongoose from "mongoose";
+const { Schema, model } = mongoose;
+
+const fileSchema = new Schema(
+  {
+    filename: {
+      type: String,
+      trim: true,
+      maxlength: 255,
+    },
+
+    originalName: {
+      type: String,
+      trim: true,
+      maxlength: 255,
+    },
+
+    url: {
+      type: String,
+      trim: true,
+    },
+
+    key: {
+      type: String,
+      trim: true,
+    },
+
+    mimeType: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
+
+    sizeBytes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
+const noteSchema = new Schema(
+  {
+    noteId: {
+      type: String,
+    },
+
+    note: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 5000,
+    },
+
+    addedBy: {
+      employeeId: {
+        type: String,
+        default: null,
+      },
+
+      employeeRef: {
+        type: Schema.Types.ObjectId,
+        ref: "Employee",
+        default: null,
+      },
+
+      name: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 255,
+        default: null,
+      },
+    },
+
+    addedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const jobApplicationSchema = new Schema(
+  {
+    applicationId: {
+      type: String,
+      unique: true,
+    },
+
+    job: {
+      type: Schema.Types.ObjectId,
+      ref: "Job",
+      required: true,
+    },
+
+    jobId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    applicant: {
+      firstName: {
+        type: String,
+        required: true,
+        trim: true,
+        minlength: 2,
+        maxlength: 100,
+      },
+
+      lastName: {
+        type: String,
+        required: true,
+        trim: true,
+        minlength: 2,
+        maxlength: 100,
+      },
+
+      email: {
+        type: String,
+        required: true,
+        lowercase: true,
+        trim: true,
+        maxlength: 255,
+      },
+
+      phone: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 20,
+      },
+
+      city: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      state: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      country: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      totalExperienceYears: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      currentCompany: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: null,
+      },
+
+      currentCTC: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      expectedCTC: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      noticePeriodDays: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      portfolioUrl: {
+        type: String,
+        trim: true,
+        default: null,
+      },
+
+      linkedinUrl: {
+        type: String,
+        trim: true,
+        default: null,
+      },
+
+      githubUrl: {
+        type: String,
+        trim: true,
+        default: null,
+      },
+    },
+
+    coverLetter: {
+      type: String,
+      trim: true,
+      maxlength: 5000,
+      default: null,
+    },
+
+    resume: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    additionalFiles: {
+      type: [fileSchema],
+      default: [],
+    },
+
+    source: {
+      type: String,
+      enum: ["career_page", "linkedin", "naukri", "referral", "manual", "other"],
+      default: "career_page",
+    },
+
+    status: {
+      type: String,
+      enum: ["applied", "shortlisted", "interview_scheduled", "interviewed", "selected", "rejected", "hired"],
+      default: "applied",
+    },
+
+    notes: {
+      type: [noteSchema],
+      default: [],
+    },
+
+    assignedTo: {
+      employeeId: {
+        type: String,
+        default: null,
+      },
+
+      employeeRef: {
+        type: Schema.Types.ObjectId,
+        ref: "Employee",
+        default: null,
+      },
+
+      name: {
+        type: String,
+        trim: true,
+        maxlength: 100,
+        default: null,
+      },
+
+      email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 255,
+        default: null,
+      },
+    },
+
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export default model("JobApplication", jobApplicationSchema);

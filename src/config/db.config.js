@@ -1,12 +1,22 @@
+/**
+ * Connects Mongoose to MONGODB_URI. Throws when the connection fails, so app.js can log it and
+ * stop the server instead of running without a database.
+ *
+ * Used by: app.js
+ */
 import mongoose from "mongoose";
-const connectDB = async()=>{
-  try{
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
-     console.log(`MongoDB connected: ${conn.connection.host}`);
-  }
-  catch(error){
-    console.error(`Error connecting to MongoDB: ${error.message}`);
-    process.getMaxListeners(1);
-  }
+import { logger } from "../helpers/logger.helper.js";
+
+/**
+ * Opens the MongoDB connection.
+ *
+ * @returns {Promise<typeof mongoose>}
+ * @throws {Error} When MongoDB cannot be reached.
+ */
+const connectDB = async () => {
+  const connection = await mongoose.connect(process.env.MONGODB_URI);
+  logger.info("MongoDB connected", { host: connection.connection.host });
+  return connection;
 };
+
 export default connectDB;

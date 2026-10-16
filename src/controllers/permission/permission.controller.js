@@ -1,7 +1,25 @@
-import { sendError, handleError } from "../../helpers/error.helper.js";
-import {sendSuccess} from "../../helpers/response.helper.js"
-import { assignPermissionToEmployeeService, createPermissionService, deleteAllPermissionsService, deletePermissionService, getAllPermissionsService, getPermissionAuditLogsService, removePermissionFromEmployeeService } from "../../services/permission.service.js";
+/**
+ * HTTP handlers for permission definitions and assigning them to employees: read the request, call
+ * the service, send the response. No business logic here.
+ *
+ * Exports: createPermission, getAllPermissions, deletePermission, assignPermissionToEmployee,
+ * removePermissionFromEmployee, getPermissionAuditLogs, deleteAllPermissions
+ * Used by: routes/permissions.routes.js
+ */
+
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import {
+  assignPermissionToEmployeeService,
+  createPermissionService,
+  deleteAllPermissionsService,
+  deletePermissionService,
+  getAllPermissionsService,
+  getPermissionAuditLogsService,
+  removePermissionFromEmployeeService,
+} from "../../services/permission/permission.service.js";
 import { validateAssignPermissionBody, validatePermissionBody } from "./permission.validator.js";
+import { ValidationError } from "../../helpers/apperror.helper.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createPermission
@@ -34,24 +52,15 @@ import { validateAssignPermissionBody, validatePermissionBody } from "./permissi
  *   }
  * }
  */
-export const createPermission = async (req, res) => {
-  try {
-    const { value, error } = validatePermissionBody(req.body);
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    const result = await createPermissionService(value, req.user);
-   return sendSuccess(res, result, 201, "Permission created successfully");
-  } catch (error) {
-    return handleError(res, error);
+export const createPermission = asyncHandler(async (req, res) => {
+  const { value, error } = validatePermissionBody(req.body);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-}
+
+  const result = await createPermissionService(value, req.user);
+  return sendCreated(res, { data: result, message: "Permission created successfully" });
+});
 
 /**
  * @function getAllPermissions
@@ -85,25 +94,16 @@ export const createPermission = async (req, res) => {
  *   ]
  * }
  */
-export const getAllPermissions = async (req, res) => {
-  try {
-    const { page = 1, limit = 10 } = req.query;
+export const getAllPermissions = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 10 } = req.query;
 
-    const result = await getAllPermissionsService({
-      page,
-      limit,
-    });
+  const result = await getAllPermissionsService({
+    page,
+    limit,
+  });
 
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Permissions fetched successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "Permissions fetched successfully" });
+});
 
 /**
  * @function deletePermission
@@ -137,25 +137,17 @@ export const getAllPermissions = async (req, res) => {
  *   }
  * }
  */
-export const deletePermission = async (req, res) => {
-  try {
-    const { permissionId } = req.params;
+export const deletePermission = asyncHandler(async (req, res) => {
+  const { permissionId } = req.params;
 
-    if (!permissionId) {
-      return sendError(res, {
-        message: "permissionId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-
-// AFTER
-const result = await deletePermissionService(permissionId, req.user, req.permissionAction);
-return sendSuccess(res, result, 200, "Permission deleted successfully");
-  } catch (error) {
-    return handleError(res, error);
+  if (!permissionId) {
+    throw new ValidationError("permissionId is required");
   }
-};
+
+  // AFTER
+  const result = await deletePermissionService(permissionId, req.user, req.permissionAction);
+  return sendSuccess(res, { data: result, message: "Permission deleted successfully" });
+});
 
 /**
  * @function assignPermissionToEmployee
@@ -186,33 +178,16 @@ return sendSuccess(res, result, 200, "Permission deleted successfully");
  *   }
  * }
  */
-export const assignPermissionToEmployee = async (req, res) => {
-  try {
-    const { value, error } = validateAssignPermissionBody(req.body);
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    const result = await assignPermissionToEmployeeService(
-      value,
-      req.user
-    );
-
-    return sendSuccess(
-      res,
-      result,
-      201,
-      "Permission assigned successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const assignPermissionToEmployee = asyncHandler(async (req, res) => {
+  const { value, error } = validateAssignPermissionBody(req.body);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+
+  const result = await assignPermissionToEmployeeService(value, req.user);
+
+  return sendCreated(res, { data: result, message: "Permission assigned successfully" });
+});
 
 /**
  * @function removePermissionFromEmployee
@@ -242,33 +217,16 @@ export const assignPermissionToEmployee = async (req, res) => {
  *   }
  * }
  */
-export const removePermissionFromEmployee = async (req, res) => {
-  try {
-    const { value, error } = validateAssignPermissionBody(req.body);
-    if(error){
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message),
-      });
-    }
-
-    const result = await removePermissionFromEmployeeService(
-      value,
-      req.user
-    );
-
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Permission removed successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
+export const removePermissionFromEmployee = asyncHandler(async (req, res) => {
+  const { value, error } = validateAssignPermissionBody(req.body);
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+
+  const result = await removePermissionFromEmployeeService(value, req.user);
+
+  return sendSuccess(res, { data: result, message: "Permission removed successfully" });
+});
 
 /**
  * @function getPermissionAuditLogs
@@ -313,28 +271,22 @@ export const removePermissionFromEmployee = async (req, res) => {
  *   ]
  * }
  */
-export const getPermissionAuditLogs = async (req, res) => {
-  try {
-    /* ---------- QUERY PARAMS ---------- */
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+export const getPermissionAuditLogs = asyncHandler(async (req, res) => {
+  /* ---------- QUERY PARAMS ---------- */
+  const page = Math.max(parseInt(req.query.page) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
 
-    /* ---------- SERVICE ---------- */
-    const result = await getPermissionAuditLogsService({ page, limit });
+  /* ---------- SERVICE ---------- */
+  const result = await getPermissionAuditLogsService({ page, limit });
 
-    return sendSuccess(
-      res,
-      {
-        pagination: result.pagination,
-        logs: result.logs,
-      },
-      200,
-      "Permission audit logs fetched successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, {
+    data: {
+      pagination: result.pagination,
+      logs: result.logs,
+    },
+    message: "Permission audit logs fetched successfully",
+  });
+});
 /**
  * @function deleteAllPermissions
  *
@@ -355,17 +307,8 @@ export const getPermissionAuditLogs = async (req, res) => {
  *   data: null
  * }
  */
-export const deleteAllPermissions = async (req, res) => {
-  try {
-    const result = await deleteAllPermissionsService(req.user);
+export const deleteAllPermissions = asyncHandler(async (req, res) => {
+  const result = await deleteAllPermissionsService(req.user);
 
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "All permissions deleted successfully"
-    );
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "All permissions deleted successfully" });
+});

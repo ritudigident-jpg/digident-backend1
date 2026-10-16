@@ -1,8 +1,24 @@
-import { createContactService,getAllContactsService,getContactByIdService, deleteAllContactsService } from "../../services/contact.service.js";
-import { contactValidationSchema } from "./contact.validation.js";
-import { sendError, handleError } from "../../helpers/error.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
+/**
+ * HTTP handlers for contact-form messages from the website: read the request, call the service,
+ * send the response. No business logic here.
+ *
+ * Exports: createContact, getAllContacts, getContactById, deleteAllContacts
+ * Used by: routes/contacts.routes.js
+ */
+
+import {
+  createContactService,
+  getAllContactsService,
+  getContactByIdService,
+  deleteAllContactsService,
+} from "../../services/contact/contact.service.js";
+import { contactValidationSchema } from "./contact.validator.js";
+
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
 import { getPagination } from "../../helpers/pagination.helper.js";
+import { NotFoundError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createContact
@@ -30,34 +46,19 @@ import { getPagination } from "../../helpers/pagination.helper.js";
  *   data: contact
  * }
  */
-export const createContact = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { error, value } = contactValidationSchema.validate(req.body, {
-      abortEarly: false,
-    });
-    if (error){
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map(err => err.message),
-      });
-    }
-    /* ---------- SERVICE CALL ---------- */
-    const contact = await createContactService(value);
-    /* ---------- RESPONSE ---------- */
-    return sendSuccess(
-      res,
-      contact,
-      201,
-      "Message saved and emails sent successfully!"
-    );
-  } catch (error) {
-    console.error("Create Contact Error:", error);
-    return handleError(res, error);
+export const createContact = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { error, value } = contactValidationSchema.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  /* ---------- SERVICE CALL ---------- */
+  const contact = await createContactService(value);
+  /* ---------- RESPONSE ---------- */
+  return sendCreated(res, { data: contact, message: "Message saved and emails sent successfully!" });
+});
 
 /**
  * @function getAllContacts
@@ -85,19 +86,15 @@ export const createContact = async (req, res) => {
  *   }
  * }
  */
-export const getAllContacts = async (req, res) => {
-  try {
-    const { page, limit, skip } = getPagination(req.query);
-    const { contacts, pagination } = await getAllContactsService({
-      page,
-      limit,
-      skip,
-    });
-    return sendSuccess(res, { contacts, pagination }, 200);
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+export const getAllContacts = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query);
+  const { contacts, pagination } = await getAllContactsService({
+    page,
+    limit,
+    skip,
+  });
+  return sendSuccess(res, { data: { contacts, pagination } });
+});
 
 /**
  * @function getContactById
@@ -120,39 +117,21 @@ export const getAllContacts = async (req, res) => {
  *   data: contact
  * }
  */
-export const getContactById = async (req, res) => {
-  try {
-    const { contactId } = req.params;
-    /* ---------- VALIDATION ---------- */
-    if (!contactId){
-      return sendError(res, {
-        message: "ContactId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-      });
-    }
-    /* ---------- SERVICE CALL ---------- */
-    const contact = await getContactByIdService({ contactId });
-    /* ---------- NOT FOUND ---------- */
-    if (!contact) {
-      return sendError(res, {
-        message: "Contact not found",
-        statusCode: 404,
-        errorCode: "NOT_FOUND",
-      });
-    }
-    /* ---------- SUCCESS ---------- */
-    return sendSuccess(
-      res,
-      contact,
-      200,
-      "Contact fetched successfully"
-    );
-  } catch (error) {
-    console.error("Error in getContactById:", error);
-    return handleError(res, error);
+export const getContactById = asyncHandler(async (req, res) => {
+  const { contactId } = req.params;
+  /* ---------- VALIDATION ---------- */
+  if (!contactId) {
+    throw new ValidationError("ContactId is required");
   }
-};
+  /* ---------- SERVICE CALL ---------- */
+  const contact = await getContactByIdService({ contactId });
+  /* ---------- NOT FOUND ---------- */
+  if (!contact) {
+    throw new NotFoundError("Contact not found", { code: ERROR_CODES.NOT_FOUND });
+  }
+  /* ---------- SUCCESS ---------- */
+  return sendSuccess(res, { data: contact, message: "Contact fetched successfully" });
+});
 
 /**
  * @function deleteAllContacts
@@ -168,28 +147,13 @@ export const getContactById = async (req, res) => {
  *   data: { deletedCount }
  * }
  */
-export const deleteAllContacts = async (req, res) => {
-  try {
-    /* ---------- SERVICE CALL ---------- */
-    const { deletedCount } = await deleteAllContactsService();
-    /* ---------- NO DATA ---------- */
-    if (deletedCount === 0){
-      return sendSuccess(
-        res,
-        { deletedCount: 0 },
-        200,
-        "No contact messages to delete"
-      );
-    }
-    /* ---------- SUCCESS ---------- */
-    return sendSuccess(
-      res,
-      { deletedCount },
-      200,
-      "All contact messages deleted successfully"
-    );
-  } catch (error) {
-    console.error("Error in deleteAllContacts:", error);
-    return handleError(res, error);
+export const deleteAllContacts = asyncHandler(async (req, res) => {
+  /* ---------- SERVICE CALL ---------- */
+  const { deletedCount } = await deleteAllContactsService();
+  /* ---------- NO DATA ---------- */
+  if (deletedCount === 0) {
+    return sendSuccess(res, { data: { deletedCount: 0 }, message: "No contact messages to delete" });
   }
-};
+  /* ---------- SUCCESS ---------- */
+  return sendSuccess(res, { data: { deletedCount }, message: "All contact messages deleted successfully" });
+});

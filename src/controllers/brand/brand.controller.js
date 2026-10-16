@@ -1,10 +1,26 @@
-import { handleError, sendError } from "../../helpers/error.helper.js";
-import { getPagination } from "../../helpers/pagination.helper.js";
-import { sendSuccess } from "../../helpers/response.helper.js";
-import Employee from "../../models/manage/employee.model.js";
-import { createBrandService, deleteAllBrandsService, deleteBrandService, getAllBrandsService, getBrandByIdService, updateBrandService } from "../../services/brand.service.js";
-import { createBrandValidator, updateBrandValidator } from "./ brand.validator.js";
+/**
+ * HTTP handlers for implant brands (logo and downloadable files per category): read the request,
+ * call the service, send the response. No business logic here.
+ *
+ * Exports: createBrand, updateBrand, getAllBrands, getBrandById, deleteBrandByBrandId,
+ * deleteAllBrands
+ * Used by: routes/brands.routes.js
+ */
 
+import { sendSuccess, sendCreated } from "../../helpers/response.helper.js";
+import Employee from "../../models/employee.model.js";
+import {
+  createBrandService,
+  deleteAllBrandsService,
+  deleteBrandService,
+  getAllBrandsService,
+  getBrandByIdService,
+  updateBrandService,
+} from "../../services/brand/brand.service.js";
+import { createBrandValidator, updateBrandValidator } from "./brand.validator.js";
+import { NotFoundError, ValidationError } from "../../helpers/apperror.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
 
 /**
  * @function createBrand
@@ -34,61 +50,38 @@ import { createBrandValidator, updateBrandValidator } from "./ brand.validator.j
  * 409 - BRAND_ALREADY_EXISTS
  * 500 - INTERNAL_SERVER_ERROR
  */
-export const createBrand = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = createBrandValidator.validate(req.body, {
-      abortEarly: false
-    });
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((err) => err.message)
-      });
-    }
-    const { brandName, categories, permission } = value;
-    const logoFile = req.files?.logoUrl?.[0];
-    const files = req.files?.file || [];
-
-    if (!logoFile) {
-      return sendError(res, {
-        message: "Logo is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-    const result = await createBrandService({
-      brandName,
-      categories,
-      files,
-      logoFile,
-      employee,
-      permission
-    });
-    return sendSuccess(
-      res,
-      result,
-      201,
-      "Brand created successfully"
-    );
-    }catch (error) {
-    console.error("Create Brand Error:", error);
-    return handleError(res, error);
+export const createBrand = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = createBrandValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
+  const { brandName, categories, permission } = value;
+  const logoFile = req.files?.logoUrl?.[0];
+  const files = req.files?.file || [];
+
+  if (!logoFile) {
+    throw new ValidationError("Logo is required");
+  }
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+  const result = await createBrandService({
+    brandName,
+    categories,
+    files,
+    logoFile,
+    employee,
+    permission,
+  });
+  return sendCreated(res, { data: result, message: "Brand created successfully" });
+});
 
 /**
  * @function updateBrand
@@ -117,77 +110,49 @@ export const createBrand = async (req, res) => {
  * 409 - Duplicate brand brandName
  * 500 - Internal server error
  */
-export const updateBrand = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { value, error } = updateBrandValidator.validate(req.body, {
-      abortEarly: false
-    });
+export const updateBrand = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = updateBrandValidator.validate(req.body, {
+    abortEarly: false,
+  });
 
-    if (error) {
-      return sendError(res, {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((e) => e.message)
-      });
-    }
-
-    const { brandName, categories, removeFileIds, permission } = value;
-
-    const brandId = req.params.brandId;
-
-    if (!brandId) {
-      return sendError(res, {
-        message: "BrandId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-
-    const logoFile = req.files?.logoUrl?.[0];
-    const files = req.files?.file || [];
-
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    const result = await updateBrandService({
-      brandId,
-      brandName,
-      categories,
-      removeFileIds,
-      files,
-      logoFile,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Brand updated successfully"
-    );
-
-  } catch (error) {
-
-    console.error("Update Brand Error:", error);
-
-    return handleError(res, error);
-
+  if (error) {
+    throw ValidationError.fromJoi(error);
   }
-};
 
+  const { brandName, categories, removeFileIds, permission } = value;
+
+  const brandId = req.params.brandId;
+
+  if (!brandId) {
+    throw new ValidationError("BrandId is required");
+  }
+
+  const logoFile = req.files?.logoUrl?.[0];
+  const files = req.files?.file || [];
+
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  const result = await updateBrandService({
+    brandId,
+    brandName,
+    categories,
+    removeFileIds,
+    files,
+    logoFile,
+    employee,
+    permission,
+  });
+
+  return sendSuccess(res, { data: result, message: "Brand updated successfully" });
+});
 
 /**
  * @function getAllBrands
@@ -196,25 +161,10 @@ export const updateBrand = async (req, res) => {
  * @description
  * Fetch all brands with pagination
  */
-export const getAllBrands = async (req, res) => {
-  try {
-    const result = await getAllBrandsService();
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Brands fetched successfully"
-    );
-
-  } catch (error) {
-
-    console.error("Get Brands Error:", error);
-
-    return handleError(res, error);
-
-  }
-};
-
+export const getAllBrands = asyncHandler(async (req, res) => {
+  const result = await getAllBrandsService();
+  return sendSuccess(res, { data: result, message: "Brands fetched successfully" });
+});
 
 /**
  * @function getBrandById
@@ -223,28 +173,13 @@ export const getAllBrands = async (req, res) => {
  * @description
  * Fetch a single brand by its ID
  */
-export const getBrandById = async (req, res) => {
-  try {
+export const getBrandById = asyncHandler(async (req, res) => {
+  const { brandId } = req.params;
 
-    const { brandId } = req.params;
+  const result = await getBrandByIdService(brandId);
 
-    const result = await getBrandByIdService(brandId);
-
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Brand fetched successfully"
-    );
-
-  } catch (error) {
-
-    console.error("Get Brand By ID Error:", error);
-
-    return handleError(res, error);
-
-  }
-};
+  return sendSuccess(res, { data: result, message: "Brand fetched successfully" });
+});
 
 /**
  * @function deleteBrandByBrandId
@@ -270,47 +205,29 @@ export const getBrandById = async (req, res) => {
  * @response
  * 200 { success: true, message: "Brand deleted successfully", data: null }
  */
-export const deleteBrandByBrandId = async (req, res) => {
-  try {
-    const { brandId } = req.params;
-    const { permission } = req.body;
-    if (!brandId) {
-      return sendError(res, {
-        message: "BrandId is required",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR"
-      });
-    }
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    await deleteBrandService({
-      brandId,
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      null,
-      200,
-      "Brand deleted successfully"
-    );
-  } catch (error) {
-    console.error("Delete Brand Error:", error);
-    return handleError(res, error);
+export const deleteBrandByBrandId = asyncHandler(async (req, res) => {
+  const { brandId } = req.params;
+  const { permission } = req.body;
+  if (!brandId) {
+    throw new ValidationError("BrandId is required");
   }
-};
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
+
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
+  }
+
+  await deleteBrandService({
+    brandId,
+    employee,
+    permission,
+  });
+
+  return sendSuccess(res, { data: null, message: "Brand deleted successfully" });
+});
 
 /**
  * @function deleteAllBrands
@@ -337,37 +254,22 @@ export const deleteBrandByBrandId = async (req, res) => {
  *   data: { deletedCount }
  * }
  */
-export const deleteAllBrands = async (req, res) => {
-  try {
+export const deleteAllBrands = asyncHandler(async (req, res) => {
+  const { permission } = req.body;
 
-    const { permission } = req.body;
+  /* ---------- FETCH EMPLOYEE ---------- */
+  const employee = await Employee.findOne({
+    email: req.user.email,
+  });
 
-    /* ---------- FETCH EMPLOYEE ---------- */
-    const employee = await Employee.findOne({
-      email: req.user.email
-    });
-
-    if (!employee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND"
-      });
-    }
-
-    const result = await deleteAllBrandsService({
-      employee,
-      permission
-    });
-
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "All brands deleted successfully"
-    );
-  } catch (error) {
-    console.error("Delete All Brands Error:", error);
-    return handleError(res, error);
+  if (!employee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
   }
-};
+
+  const result = await deleteAllBrandsService({
+    employee,
+    permission,
+  });
+
+  return sendSuccess(res, { data: result, message: "All brands deleted successfully" });
+});

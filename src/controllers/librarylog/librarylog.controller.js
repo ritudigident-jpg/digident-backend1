@@ -1,0 +1,630 @@
+/**
+ * HTTP handlers for CAD library downloads (OTP-verified customers and download logs): read the
+ * request, call the service, send the response. No business logic here.
+ *
+ * Exports: sendEmailOtp, verifyOtpAndCreateCustomer, getCustomerData, deleteCustomerData,
+ * getAllConsumers, getEmailVerifyDummy, getAllEmailVerifyDummy, deleteAllOtpAndCustomers and 4
+ * more
+ * Used by: routes/librarylogs.routes.js
+ */
+
+import { sendSuccess } from "../../helpers/response.helper.js";
+import {
+  sendEmailOtpValidator,
+  updateScanbridgeLibraryValidator,
+  verifyOtpAndCreateCustomerValidator,
+} from "./librarylog.validator.js";
+import {
+  sendEmailOtpService,
+  verifyOtpAndCreateCustomerService,
+  getAllConsumersService,
+  getEmailVerifyDummyService,
+  getLibraryDashboardService,
+  deleteOtpByEmailService,
+  getScanbridgeLibraryService,
+  updateScanbridgeLibraryService,
+} from "../../services/librarylog/librarylog.service.js";
+import CustomerData from "../../models/customerdata.model.js";
+import EmailVerifyDummy from "../../models/dummyemailverify.model.js";
+import { getPagination } from "../../helpers/pagination.helper.js";
+import { ValidationError, NotFoundError } from "../../helpers/apperror.helper.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
+
+/**
+ * @function sendEmailOtp
+ *
+ * @description
+ * Sends an OTP to the user's email for verification. If the email is already
+ * verified, skips OTP flow and logs the requested library access.
+ *
+ * @params
+ * body: {
+ *   email: string,
+ *   libraryObjectId: string,
+ *   libraryId: string,
+ *   brand: string,
+ *   category: string
+ * }
+ *
+ * @process
+ * 1. Validate input
+ *    - Ensure all required fields are present
+ *
+ * 2. Check existing user
+ *    - If user exists AND email is already verified:
+ *        → Skip OTP generation
+ *        → Log library access directly
+ *        → Return success (isVerified: true)
+ *
+ * 3. Generate OTP
+ *    - Create 6-digit OTP
+ *    - Set expiry (5 minutes)
+ *
+ * 4. Store OTP
+ *    - Upsert into EmailVerifyDummy collection
+ *
+ * 5. Send OTP email
+ *    - Use email template
+ *    - Send via Zoho Mail service
+ *
+ * 6. Return response
+ *    - Indicate verification required
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "OTP sent to email successfully",
+ *   data: {
+ *     isVerified: false
+ *   }
+ * }
+ *
+ * @alternate_response
+ * 200 {
+ *   success: true,
+ *   message: "Email already verified. Library logged successfully.",
+ *   data: {
+ *     isVerified: true
+ *   }
+ * }
+ *
+ * @errors
+ * 400: Missing required fields
+ * 500: Email sending or DB failure
+ */
+
+/**
+ * @function sendEmailOtp
+ *
+ * @params
+ * req.body = {
+ *   email
+ * }
+ *
+ * @process
+ * 1. Validate request body
+ * 2. Call sendEmailOtpService
+ * 3. If email already verified, return verified response
+ * 4. Otherwise generate OTP, save it, and send email
+ *
+ * @response
+ * 200 - Email already verified / OTP sent successfully
+ * 400 - Validation failed
+ * 500 - Internal server error
+ */
+export const sendEmailOtp = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = sendEmailOtpValidator.validate(req.body, {
+    abortEarly: false,
+  });
+  if (error) {
+    throw ValidationError.fromJoi(error);
+  }
+  /* ---------- SERVICE ---------- */
+  const result = await sendEmailOtpService(value);
+  return sendSuccess(res, {
+    data: result,
+    message: result.isVerified ? "Email already verified" : "OTP sent to email successfully",
+  });
+});
+
+/**
+ * @function verifyOtpAndCreateCustomer
+ *
+ * @description
+ * Verifies OTP and creates a new customer account.
+ *
+ * @params
+ * body: {
+ *   email: string,
+ *   otp: string,
+ *   firstName: string,
+ *   lastName: string,
+ *   mobileNumber: string,
+ *   companyName: string,
+ *   address: {
+ *     line1: string,
+ *     city: string,
+ *     state: string,
+ *     postalCode: string,
+ *     country: string
+ *   }
+ * }
+ *
+ * @process
+ * 1. Validate request body using Joi
+ * 2. Normalize email to lowercase
+ * 3. Fetch OTP record from DB
+ * 4. Validate:
+ *    - OTP exists
+ *    - OTP matches
+ *    - OTP not expired
+ * 5. Check if customer already exists
+ *    - If yes → return verified response
+ * 6. Create new customer with verified email
+ * 7. Delete OTP record after success
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "OTP verified and customer created" | "Email already verified",
+ *   data: {
+ *     userId,
+ *     email,
+ *     isVerified: true
+ *   }
+ * }
+ *
+ * @errors
+ * 400 VALIDATION_ERROR → Missing or invalid fields
+ * 400 INVALID_OTP → Wrong OTP
+ * 400 OTP_EXPIRED → OTP expired
+ * 400 OTP_NOT_FOUND → No OTP record
+ * 500 INTERNAL_SERVER_ERROR → Server error
+ */
+
+/**
+ * @function verifyOtpAndCreateCustomer
+ *
+ * @params
+ * req.body = {
+ *   email,
+ *   otp,
+ *   libraryObjectId,
+ *   libraryId,
+ *   brand,
+ *   category,
+ *   firstName,
+ *   lastName,
+ *   mobileNumber,
+ *   companyName,
+ *   address
+ * }
+ *
+ * @process
+ * 1. Validate request body
+ * 2. Call verifyOtpAndCreateCustomerService
+ * 3. Return success response
+ *
+ * @response
+ * 200 - OTP verified and customer created successfully / Email already verified, library log updated
+ * 400 - Validation failed
+ * 500 - Internal server error
+ */
+export const verifyOtpAndCreateCustomer = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = verifyOtpAndCreateCustomerValidator.validate(req.body, { abortEarly: false });
+  if (error) {
+    throw ValidationError.fromJoi(error);
+  }
+  /* ---------- SERVICE ---------- */
+  const result = await verifyOtpAndCreateCustomerService(value);
+  return sendSuccess(res, { data: result, message: result.message });
+});
+/**
+ * @function getCustomerData
+ *
+ * @description
+ * Fetch customer details using customerId.
+ *
+ * @params
+ * params: {
+ *   customerId: string
+ * }
+ *
+ * @process
+ * 1. Validate customerId from request params
+ * 2. Fetch customer from database using customerId
+ * 3. If not found → throw error
+ * 4. Return retrieved customer data
+ *
+ * @errors
+ * 400 VALIDATION_ERROR → customerId missing
+ * 404 USER_NOT_FOUND → Customer not found
+ * 500 INTERNAL_SERVER_ERROR → Server error
+ */
+export const getCustomerData = asyncHandler(async (req, res) => {
+  const { customerId } = req.params;
+  /* ---------- VALIDATION ---------- */
+  if (!customerId) {
+    throw new ValidationError("customerId is required");
+  }
+  const user = await CustomerData.findOne({ customerId }).lean();
+  if (!user) {
+    throw new NotFoundError("User not found");
+  }
+  return sendSuccess(res, { data: user, message: "User data retrieved successfully" });
+});
+
+/**
+ * @function deleteCustomerData
+ *
+ * @description
+ * Deletes a customer using customerId.
+ *
+ * @params
+ * params: {
+ *   customerId: string
+ * }
+ *
+ * @process
+ * 1. Validate customerId from request params
+ * 2. Find and delete customer from database
+ * 3. If not found → throw error
+ * 4. Return success response
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "User data deleted successfully"
+ * }
+ *
+ * @errors
+ * 400 VALIDATION_ERROR → customerId missing
+ * 404 USER_NOT_FOUND → Customer not found
+ * 500 INTERNAL_SERVER_ERROR → Server error
+ */
+export const deleteCustomerData = asyncHandler(async (req, res) => {
+  const { customerId } = req.params;
+  /* ---------- VALIDATION ---------- */
+  if (!customerId) {
+    throw new ValidationError("customerId is required");
+  }
+  const user = await CustomerData.findOneAndDelete({ customerId });
+  if (!user) {
+    throw new NotFoundError("User not found");
+  }
+  return sendSuccess(res, { data: null, message: "User data deleted successfully" });
+});
+
+/**
+ * @function getAllConsumers
+ *
+ * @description
+ * Fetch all customers with pagination support.
+ *
+ * @params
+ * query: {
+ *   page?: number,
+ *   limit?: number
+ * }
+ *
+ * @process
+ * 1. Extract pagination values using shared utility (getPagination)
+ * 2. Fetch customers from database with sorting (latest first)
+ * 3. Count total number of customers
+ * 4. Return paginated result with metadata
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "All consumers retrieved successfully",
+ *   data: {
+ *     users: [],
+ *     pagination: {
+ *       totalItems,
+ *       totalPages,
+ *       currentPage,
+ *       nextPage,
+ *       prevPage,
+ *       limit
+ *     }
+ *   }
+ * }
+ *
+ * @errors
+ * 500 INTERNAL_SERVER_ERROR → Server error
+ */
+export const getAllConsumers = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query);
+  const result = await getAllConsumersService({ skip, limit, page });
+  return sendSuccess(res, { data: result, message: "All consumers retrieved successfully" });
+});
+
+/**
+ * @function getEmailVerifyDummy
+ *
+ * @description
+ * Fetch OTP records with optional email filter and pagination.
+ *
+ * @params
+ * query: {
+ *   email?: string,
+ *   page?: number,
+ *   limit?: number
+ * }
+ *
+ * @process
+ * 1. Extract pagination values using getPagination utility
+ * 2. Build filter object (email optional)
+ * 3. Fetch OTP records from database (latest first)
+ * 4. Count total records
+ * 5. Return paginated response
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "OTP records fetched successfully",
+ *   data: {
+ *     records: [],
+ *    pagination: {
+ *       totalItems,
+ *       totalPages,
+ *       currentPage,
+ *       nextPage,
+ *       prevPage,
+ *       limit
+ *     }
+ *   }
+ * }
+ *
+ * @errors
+ * 500 INTERNAL_SERVER_ERROR → Server error
+ */
+export const getEmailVerifyDummy = asyncHandler(async (req, res) => {
+  const { email, page, limit } = req.query;
+  const { page: pg, limit: lm, skip } = getPagination({ page, limit });
+  const result = await getEmailVerifyDummyService({
+    email,
+    skip,
+    limit: lm,
+    page: pg,
+  });
+
+  return sendSuccess(res, { data: result, message: "OTP records fetched successfully" });
+});
+
+/**
+ * @function getAllEmailVerifyDummy
+ *
+ * @process
+ * Fetch all OTP verification records from database
+ * Sort records by latest created first
+ * Convert mongoose docs to plain objects using lean()
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "All EmailVerifyDummy data fetched successfully",
+ *   data: {
+ *     records: [],
+ *     totalRecords: number
+ *   }
+ * }
+ *
+ * @error
+ * 500 Server error handled via handleError
+ */
+export const getAllEmailVerifyDummy = asyncHandler(async (req, res) => {
+  const records = await EmailVerifyDummy.find().sort({ createdAt: -1 }).lean();
+
+  return sendSuccess(res, {
+    data: {
+      records,
+      totalRecords: records.length,
+    },
+    message: "All EmailVerifyDummy data fetched successfully",
+  });
+});
+
+/**
+ * @function deleteAllOtpAndCustomers
+ *
+ * @process
+ * Delete all OTP records from EmailVerifyDummy collection
+ * Delete all customer records from Customer collection
+ * Execute both operations in parallel using Promise.all for performance
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "All OTP and Customer data deleted successfully",
+ *   data: {
+ *     otpDeleted: number,
+ *     customersDeleted: number
+ *   }
+ * }
+ *
+ * @error
+ * 500 Server error handled via handleError
+ */
+export const deleteAllOtpAndCustomers = asyncHandler(async (req, res) => {
+  const [otpResult, customerResult] = await Promise.all([
+    EmailVerifyDummy.deleteMany({}),
+    CustomerData.deleteMany({}),
+  ]);
+
+  return sendSuccess(res, {
+    data: {
+      otpDeleted: otpResult.deletedCount,
+      customersDeleted: customerResult.deletedCount,
+    },
+    message: "All OTP and Customer data deleted successfully",
+  });
+});
+
+/**
+ * @function getLibraryDashboard
+ *
+ * @query
+ * {
+ *   days?: number,
+ *   groupBy?: "library" | "category" | "brand",
+ *   limit?: number,
+ *   category?: string,
+ *   brand?: string
+ * }
+ *
+ * @process
+ * Validate query params
+ * Pass params to service layer
+ * Service performs:
+ *   - Date filtering
+ *   - Aggregation on logLibrary
+ *   - Dynamic grouping (library/category/brand)
+ *   - Sorting & limiting
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "Dashboard data fetched successfully",
+ *   data: {
+ *     days,
+ *     groupBy,
+ *     category,
+ *     brand,
+ *     total,
+ *     data: []
+ *   }
+ * }
+ *
+ * @error
+ * 400 Validation error
+ * 500 Server error
+ */
+export const getLibraryDashboard = asyncHandler(async (req, res) => {
+  const days = parseInt(req.query.days) || 7;
+  const groupBy = req.query.groupBy || "library";
+  const limit = parseInt(req.query.limit) || 12;
+  const categoryFilter = req.query.category;
+  const brandFilter = req.query.brand;
+  /* ---------- VALIDATION ---------- */
+  if (days < 1) {
+    throw new ValidationError("Days must be greater than 0");
+  }
+  if (!["library", "category", "brand"].includes(groupBy)) {
+    throw new ValidationError("Invalid groupBy value");
+  }
+
+  /* ---------- SERVICE CALL ---------- */
+  const result = await getLibraryDashboardService({
+    days,
+    groupBy,
+    limit,
+    categoryFilter,
+    brandFilter,
+  });
+  return sendSuccess(res, { data: result, message: "Dashboard data fetched successfully" });
+});
+
+/**
+ * @function deleteOtpByEmail
+ *
+ * @params
+ * {
+ *   email: string (required, URL param)
+ * }
+ *
+ * @process
+ * Validate email param
+ * Convert email to lowercase
+ * Delete OTP record from EmailVerifyDummy collection
+ * Throw error if no record found
+ *
+ * @response
+ * 200 {
+ *   success: true,
+ *   message: "OTP record deleted successfully",
+ *   data: {
+ *     deletedRecord: {}
+ *   }
+ * }
+ *
+ * @error
+ * 400 Email required
+ * 404 OTP not found
+ * 500 Server error handled via handleError
+ */
+
+export const deleteOtpByEmail = asyncHandler(async (req, res) => {
+  const { email } = req.params;
+
+  /* ---------- VALIDATION ---------- */
+  if (!email) {
+    throw new ValidationError("Email is required");
+  }
+
+  /* ---------- SERVICE CALL ---------- */
+  const deletedRecord = await deleteOtpByEmailService(email);
+
+  return sendSuccess(res, { data: { deletedRecord }, message: "OTP record deleted successfully" });
+});
+
+/**
+ * @function getScanbridgeLibrary
+ *
+ * @process
+ * 1. Fetch all customers having scanbridge category in logLibrary
+ * 2. Flatten scanbridge logs
+ * 3. Return formatted response
+ *
+ * @response
+ * 200 - Scanbridge library fetched successfully
+ * 500 - Internal server error
+ */
+export const getScanbridgeLibrary = asyncHandler(async (req, res) => {
+  /* ---------- QUERY PARAMS ---------- */
+  const { page = 1, limit = 12 } = req.query;
+  /* ---------- SERVICE ---------- */
+  const result = await getScanbridgeLibraryService({ page, limit });
+  return sendSuccess(res, { data: result, message: "Scanbridge library fetched successfully" });
+});
+
+/**
+ * @function updateScanbridgeLibrary
+ *
+ * @params
+ * req.body = {
+ *   customerId,
+ *   logId,
+ *   isdelivered
+ * }
+ *
+ * @process
+ * 1. Validate request body
+ * 2. Find customer and matching library log
+ * 3. Ensure category is scanbridge
+ * 4. Update isdelivered status
+ * 5. Return updated log response
+ *
+ * @response
+ * 200 - Scanbridge library updated successfully
+ * 400 - Validation failed / invalid category
+ * 404 - Customer or library log not found
+ * 500 - Internal server error
+ */
+export const updateScanbridgeLibrary = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { value, error } = updateScanbridgeLibraryValidator.validate(req.body, {
+    abortEarly: false,
+  });
+
+  if (error) {
+    throw ValidationError.fromJoi(error);
+  }
+
+  /* ---------- SERVICE ---------- */
+  const result = await updateScanbridgeLibraryService(value);
+
+  return sendSuccess(res, { data: result, message: "Scanbridge library updated successfully" });
+});

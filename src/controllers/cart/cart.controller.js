@@ -1,7 +1,24 @@
-import { addToCartService, clearCartService, getCartService, removeCartItemService, updateCartQuantityService } from "../../services/cart.service.js";
+/**
+ * HTTP handlers for a shop customer's cart: read the request, call the service, send the response.
+ * No business logic here.
+ *
+ * Exports: addToCart, getCart, updateCartQuantity, removeCartItem, clearCart
+ * Used by: routes/carts.routes.js
+ */
+
+import {
+  addToCartService,
+  clearCartService,
+  getCartService,
+  removeCartItemService,
+  updateCartQuantityService,
+} from "../../services/cart/cart.service.js";
 import { sendSuccess } from "../../helpers/response.helper.js";
-import { handleError } from "../../helpers/error.helper.js";
+
 import { addToCartSchema, removeCartItemSchema, updateCartQuantitySchema } from "./cart.validator.js";
+import { asyncHandler } from "../../helpers/asynchandler.helper.js";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { BadRequestError } from "../../helpers/apperror.helper.js";
 
 /**
  * @function addToCart
@@ -40,41 +57,29 @@ import { addToCartSchema, removeCartItemSchema, updateCartQuantitySchema } from 
  *   items: []
  * }
  */
-export const addToCart = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { error, value } = addToCartSchema.validate({
-      ...req.body,
-      productId: req.params.productId,
+export const addToCart = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { error, value } = addToCartSchema.validate({
+    ...req.body,
+    productId: req.params.productId,
+  });
+
+  if (error) {
+    throw new BadRequestError("Validation failed", {
+      code: ERROR_CODES.VALIDATION_ERROR,
+      details: error.details.map((e) => e.message),
     });
-
-    if (error) {
-      throw {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((e) => e.message),
-      };
-    }
-
-    /* ---------- SERVICE ---------- */
-    const result = await addToCartService({
-      data: value,
-      user: req.currentUser,
-    });
-
-    /* ---------- RESPONSE ---------- */
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Item added to cart successfully"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
   }
-};
+
+  /* ---------- SERVICE ---------- */
+  const result = await addToCartService({
+    data: value,
+    user: req.currentUser,
+  });
+
+  /* ---------- RESPONSE ---------- */
+  return sendSuccess(res, { data: result, message: "Item added to cart successfully" });
+});
 
 /**
  * @function getCart
@@ -116,18 +121,13 @@ export const addToCart = async (req, res) => {
  *   ]
  * }
  */
-export const getCart = async (req, res) => {
-  try {
-    const result = await getCartService({
-      user: req.currentUser,
-    });
+export const getCart = asyncHandler(async (req, res) => {
+  const result = await getCartService({
+    user: req.currentUser,
+  });
 
-    return sendSuccess(res, result, 200, "User cart fetched");
-
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "User cart fetched" });
+});
 
 /**
  * @function updateCartQuantity
@@ -167,41 +167,29 @@ export const getCart = async (req, res) => {
  *   }
  * }
  */
-export const updateCartQuantity = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { error, value } = updateCartQuantitySchema.validate({
-      variantId: req.params.variantId,
-      quantity: req.body.quantity,
+export const updateCartQuantity = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { error, value } = updateCartQuantitySchema.validate({
+    variantId: req.params.variantId,
+    quantity: req.body.quantity,
+  });
+
+  if (error) {
+    throw new BadRequestError("Validation failed", {
+      code: ERROR_CODES.VALIDATION_ERROR,
+      details: error.details.map((e) => e.message),
     });
-
-    if (error) {
-      throw {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((e) => e.message),
-      };
-    }
-
-    /* ---------- SERVICE ---------- */
-    const result = await updateCartQuantityService({
-      data: value,
-      user: req.currentUser,
-    });
-
-    /* ---------- RESPONSE ---------- */
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Cart quantity updated"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
   }
-};
+
+  /* ---------- SERVICE ---------- */
+  const result = await updateCartQuantityService({
+    data: value,
+    user: req.currentUser,
+  });
+
+  /* ---------- RESPONSE ---------- */
+  return sendSuccess(res, { data: result, message: "Cart quantity updated" });
+});
 
 /**
  * @function removeCartItem
@@ -227,40 +215,28 @@ export const updateCartQuantity = async (req, res) => {
  *   items: []
  * }
  */
-export const removeCartItem = async (req, res) => {
-  try {
-    /* ---------- VALIDATION ---------- */
-    const { error, value } = removeCartItemSchema.validate({
-      variantId: req.params.variantId,
+export const removeCartItem = asyncHandler(async (req, res) => {
+  /* ---------- VALIDATION ---------- */
+  const { error, value } = removeCartItemSchema.validate({
+    variantId: req.params.variantId,
+  });
+
+  if (error) {
+    throw new BadRequestError("Validation failed", {
+      code: ERROR_CODES.VALIDATION_ERROR,
+      details: error.details.map((e) => e.message),
     });
-
-    if (error) {
-      throw {
-        message: "Validation failed",
-        statusCode: 400,
-        errorCode: "VALIDATION_ERROR",
-        details: error.details.map((e) => e.message),
-      };
-    }
-
-    /* ---------- SERVICE ---------- */
-    const result = await removeCartItemService({
-      data: value,
-      user: req.currentUser,
-    });
-
-    /* ---------- RESPONSE ---------- */
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Item removed from cart"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
   }
-};
+
+  /* ---------- SERVICE ---------- */
+  const result = await removeCartItemService({
+    data: value,
+    user: req.currentUser,
+  });
+
+  /* ---------- RESPONSE ---------- */
+  return sendSuccess(res, { data: result, message: "Item removed from cart" });
+});
 
 /**
  * @function clearCart
@@ -286,20 +262,10 @@ export const removeCartItem = async (req, res) => {
  *   totalItems: 0
  * }
  */
-export const clearCart = async (req, res) => {
-  try {
-    const result = await clearCartService({
-      user: req.currentUser,
-    });
+export const clearCart = asyncHandler(async (req, res) => {
+  const result = await clearCartService({
+    user: req.currentUser,
+  });
 
-    return sendSuccess(
-      res,
-      result,
-      200,
-      "Cart cleared successfully"
-    );
-
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
+  return sendSuccess(res, { data: result, message: "Cart cleared successfully" });
+});

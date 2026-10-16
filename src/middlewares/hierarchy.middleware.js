@@ -1,5 +1,13 @@
-import Employee from "../models/manage/employee.model.js";
-import { sendError, handleError } from "../helpers/error.helper.js";
+/**
+ * Stops an employee from acting on someone with an equal or higher role.
+ *
+ * Used by: routes/employees.routes.js
+ */
+
+import Employee from "../models/employee.model.js";
+import { ERROR_CODES } from "../constants/errorcodes.constant.js";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../helpers/apperror.helper.js";
+import { asyncHandler } from "../helpers/asynchandler.helper.js";
 
 /**
  * @function hierarchyMiddleware
@@ -31,89 +39,64 @@ import { sendError, handleError } from "../helpers/error.helper.js";
  * 500 { success: false, message: "Internal Server Error", error: "<error_message>" } - for any server error
  */
 
-const hierarchyMiddleware = async (req, res, next) => {
-  try {
-    const loggedInEmployee = await Employee.findOne({
-      email: req.user.email,
-    }).select("role _id");
+const hierarchyMiddleware = asyncHandler(async (req, res, next) => {
+  const loggedInEmployee = await Employee.findOne({
+    email: req.user.email,
+  }).select("role _id");
 
-    if (!loggedInEmployee) {
-      return sendError(res, {
-        message: "Employee not found",
-        statusCode: 404,
-        errorCode: "EMPLOYEE_NOT_FOUND",
-      });
-    }
-
-    let targetRole;
-
-    /* ================= CREATE ================= */
-    if (req.method === "POST") {
-      targetRole = req.body?.role;
-
-      if (targetRole === undefined) {
-        return sendError(res, {
-          message: "Role is required",
-          statusCode: 400,
-          errorCode: "ROLE_REQUIRED",
-        });
-      }
-    }
-
-    /* ================= DELETE / UPDATE ================= */
-    if (req.method === "DELETE" || req.method === "PUT") {
-      const targetEmployee = await Employee.findOne({ email: req.body.email } ).select(
-        "role _id"
-      );
-
-      if (!targetEmployee) {
-        return sendError(res, {
-          message: "Target employee not found",
-          statusCode: 404,
-          errorCode: "TARGET_EMPLOYEE_NOT_FOUND",
-        });
-      }
-
-      // ❌ cannot act on yourself
-      if (loggedInEmployee._id.equals(targetEmployee._id)){
-        return sendError(res, {
-          message: "You cannot perform this action on yourself",
-          statusCode: 403,
-          errorCode: "SELF_ACTION_FORBIDDEN",
-        });
-      }
-      targetRole = targetEmployee.role;
-    }
-
-    const creatorRole = loggedInEmployee.role;
-
-    // ❌ Executives can do nothing
-    if (creatorRole === 3) {
-      return sendError(res, {
-        message: "Executives are not allowed to perform this action",
-        statusCode: 403,
-        errorCode: "EXECUTIVE_FORBIDDEN",
-      });
-    }
-
-    // ✅ SuperAdmin can do anything
-    if (creatorRole === 0) {
-      return next();
-    }
-
-    // lower number = higher authority
-    if (creatorRole < targetRole) {
-      return next();
-    }
-
-    return sendError(res, {
-      message: "You cannot perform this action on same or higher role",
-      statusCode: 403,
-      errorCode: "HIERARCHY_VIOLATION",
-    });
-  } catch (error) {
-    console.error("Hierarchy middleware error:", error);
-    return handleError(res, error);
+  if (!loggedInEmployee) {
+    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
   }
-};
+
+  let targetRole;
+
+  /* ================= CREATE ================= */
+  if (req.method === "POST") {
+    targetRole = req.body?.role;
+
+    if (targetRole === undefined) {
+      throw new BadRequestError("Role is required", { code: ERROR_CODES.ROLE_REQUIRED });
+    }
+  }
+
+  /* ================= DELETE / UPDATE ================= */
+  if (req.method === "DELETE" || req.method === "PUT") {
+    const targetEmployee = await Employee.findOne({ email: req.body.email }).select("role _id");
+
+    if (!targetEmployee) {
+      throw new NotFoundError("Target employee not found", { code: ERROR_CODES.TARGET_EMPLOYEE_NOT_FOUND });
+    }
+
+    // ❌ cannot act on yourself
+    if (loggedInEmployee._id.equals(targetEmployee._id)) {
+      throw new ForbiddenError("You cannot perform this action on yourself", {
+        code: ERROR_CODES.SELF_ACTION_FORBIDDEN,
+      });
+    }
+    targetRole = targetEmployee.role;
+  }
+
+  const creatorRole = loggedInEmployee.role;
+
+  // ❌ Executives can do nothing
+  if (creatorRole === 3) {
+    throw new ForbiddenError("Executives are not allowed to perform this action", {
+      code: ERROR_CODES.EXECUTIVE_FORBIDDEN,
+    });
+  }
+
+  // ✅ SuperAdmin can do anything
+  if (creatorRole === 0) {
+    return next();
+  }
+
+  // lower number = higher authority
+  if (creatorRole < targetRole) {
+    return next();
+  }
+
+  throw new ForbiddenError("You cannot perform this action on same or higher role", {
+    code: ERROR_CODES.HIERARCHY_VIOLATION,
+  });
+});
 export default hierarchyMiddleware;

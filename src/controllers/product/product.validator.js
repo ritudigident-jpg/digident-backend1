@@ -1,4 +1,15 @@
+/**
+ * Joi schemas for products, variants, stock and images: request bodies are checked against these
+ * before the service runs.
+ *
+ * Exports: productSchema, validateProductBody, validateProductFiles, validateUpdateProductBody,
+ * validateUpdateProductFiles
+ * Used by: controllers/product/product.controller.js
+ */
+
 import Joi from "joi";
+import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
+import { BadRequestError } from "../../helpers/apperror.helper.js";
 
 /* =========================================================
    PRODUCT SCHEMA
@@ -19,10 +30,7 @@ export const productSchema = Joi.object({
   shortDescription: Joi.string().required(),
 
   /* ---------- STOCK ---------- */
-  stockType: Joi.string()
-    .valid("PRODUCT", "VARIANT")
-    .default("PRODUCT")
-    .required(),
+  stockType: Joi.string().valid("PRODUCT", "VARIANT").default("PRODUCT").required(),
 
   productStock: Joi.when("stockType", {
     is: "PRODUCT",
@@ -63,9 +71,7 @@ export const productSchema = Joi.object({
         })
       ),
 
-      priceType: Joi.string()
-        .valid("PRODUCT", "VARIANT")
-        .default("PRODUCT"),
+      priceType: Joi.string().valid("PRODUCT", "VARIANT").default("PRODUCT"),
 
       variantPrice: Joi.when("priceType", {
         is: "VARIANT",
@@ -73,9 +79,7 @@ export const productSchema = Joi.object({
         otherwise: Joi.forbidden(),
       }),
 
-      imageType: Joi.string()
-        .valid("PRODUCT", "VARIANT")
-        .default("PRODUCT"),
+      imageType: Joi.string().valid("PRODUCT", "VARIANT").default("PRODUCT"),
 
       variantImages: Joi.array().items(Joi.string()).optional(),
       variantStock: Joi.number().min(0).optional(),
@@ -124,24 +128,19 @@ export const validateProductFiles = (body, files) => {
   const missingFiles = [];
 
   /* ---------- PRODUCT IMAGES ---------- */
-  const hasImagesInBody =
-    Array.isArray(body.images) && body.images.length > 0;
+  const hasImagesInBody = Array.isArray(body.images) && body.images.length > 0;
 
-  const hasImagesInFiles =
-    files?.productImages && files.productImages.length > 0;
+  const hasImagesInFiles = files?.productImages && files.productImages.length > 0;
 
   if (!hasImagesInBody && !hasImagesInFiles) {
     missingFiles.push("productImages");
   }
 
   /* ---------- VARIANT IMAGES ---------- */
-  const needsVariantImages = body?.variants?.some(
-    (v) => v.imageType === "VARIANT"
-  );
+  const needsVariantImages = body?.variants?.some((v) => v.imageType === "VARIANT");
 
   if (needsVariantImages) {
-    const hasVariantImagesInFiles =
-      files?.variantImages && files.variantImages.length > 0;
+    const hasVariantImagesInFiles = files?.variantImages && files.variantImages.length > 0;
 
     const hasVariantImagesInBody = body.variants?.some(
       (v) => Array.isArray(v.variantImages) && v.variantImages.length > 0
@@ -153,12 +152,10 @@ export const validateProductFiles = (body, files) => {
   }
 
   if (missingFiles.length) {
-    throw {
-      message: "File validation failed",
-      statusCode: 400,
-      errorCode: "FILE_VALIDATION_ERROR",
+    throw new BadRequestError("File validation failed", {
+      code: ERROR_CODES.FILE_VALIDATION_ERROR,
       details: missingFiles,
-    };
+    });
   }
 };
 
@@ -166,9 +163,8 @@ export const validateProductFiles = (body, files) => {
    UPDATE PRODUCT - BODY VALIDATION
 ========================================================= */
 export const validateUpdateProductBody = (body) => {
-  const schema = productSchema.fork(
-    ["name", "category", "brand", "variants", "productStock"],
-    (field) => field.optional()
+  const schema = productSchema.fork(["name", "category", "brand", "variants", "productStock"], (field) =>
+    field.optional()
   );
 
   const { error, value } = schema.validate(body, {
@@ -188,21 +184,14 @@ export const validateUpdateProductBody = (body) => {
    UPDATE PRODUCT - FILE VALIDATION
 ========================================================= */
 export const validateUpdateProductFiles = (body, files) => {
-  const needsVariantImages = body?.variants?.some(
-    (v) => v.imageType === "VARIANT"
-  );
+  const needsVariantImages = body?.variants?.some((v) => v.imageType === "VARIANT");
 
   if (needsVariantImages) {
     const hasVariantImages =
-      files?.variantImages?.length ||
-      body.variants?.some((v) => v.variantImages?.length);
+      files?.variantImages?.length || body.variants?.some((v) => v.variantImages?.length);
 
     if (!hasVariantImages) {
-      throw {
-        message: "Variant images required",
-        statusCode: 400,
-        errorCode: "FILE_VALIDATION_ERROR",
-      };
+      throw new BadRequestError("Variant images required", { code: ERROR_CODES.FILE_VALIDATION_ERROR });
     }
   }
 };
