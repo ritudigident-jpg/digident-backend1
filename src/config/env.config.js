@@ -36,6 +36,8 @@ const schema = Joi.object({
   AWS_REGION: optionalText,
   AWS_S3_BUCKET: optionalText,
 
+  FIELD_ENCRYPTION_KEY: optionalText.description("32 random bytes, base64: encrypts bank / PAN / Aadhaar / UAN"),
+
   RAZORPAY_KEY_ID: optionalText,
   RAZORPAY_KEY_SECRET: optionalText,
   RAZORPAY_WEBHOOK_SECRET: optionalText,

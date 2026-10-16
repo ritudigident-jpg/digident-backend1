@@ -38,7 +38,7 @@ import { logger } from "./helpers/logger.helper.js";
 import { stopAllJobs } from "./helpers/cronjob.helper.js";
 
 import { bestSellerCronJob } from "./jobs/bestseller.job.js";
-import { autoAbsentCronJob } from "./jobs/automarkabsent.job.js";
+import { endOfDayCronJob } from "./jobs/endofday.job.js";
 import { startCouponExpiryCron } from "./jobs/couponexpiry.job.js";
 
 import razorpayWebhookRoutes from "./routes/razorpaywebhook.routes.js";
@@ -72,6 +72,8 @@ import notificationRoutes from "./routes/notifications.routes.js";
 import leadRoutes from "./routes/leads.routes.js";
 import manualOrderRoutes from "./routes/manualorders.routes.js";
 import creditNoteRoutes from "./routes/creditnotes.routes.js";
+import payrollRoutes from "./routes/payroll.routes.js";
+import employeeProfileRoutes from "./routes/employeeprofile.routes.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -138,6 +140,8 @@ app.use("/api/v1/leads", leadRoutes);
 app.use("/api/v1/manual-order", manualOrderRoutes);
 app.use("/api/v1/credit-note", creditNoteRoutes);
 app.use("/api/v1/testimonial", testimonialRoutes);
+app.use("/api/v1/payroll", payrollRoutes);
+app.use("/api/v1/employee-profile", employeeProfileRoutes);
 
 /* ----------------------- Error handling (always last) --------------------- */
 app.use(notFoundHandler);
@@ -188,7 +192,7 @@ const startServer = async () => {
     await connectDB();
     await redis.ping();
     bestSellerCronJob();
-    autoAbsentCronJob();
+    endOfDayCronJob();
     startCouponExpiryCron();
     server.listen(env.PORT, () => {
       logger.info("Server started", {

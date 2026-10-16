@@ -1,7 +1,9 @@
 /**
- * Mongoose model "EmployeeRecord": one attendance document per employee with a record per day.
+ * Mongoose model "EmployeeRecord": the OLD attendance store (one document per employee with a
+ * records array). Read-only since the per-day model (models/attendanceday.model.js); kept as a
+ * backup and as the source for scripts/migrateattendancedays.js. Nothing in src/ writes to it.
  *
- * Used by: jobs/automarkabsent.job.js, services/attendance/attendance.service.js
+ * Used by: scripts/migrateattendancedays.js
  */
 
 import mongoose from "mongoose";

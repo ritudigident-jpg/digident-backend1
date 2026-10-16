@@ -1,7 +1,7 @@
 /**
  * File upload settings (multer): general uploads and Excel imports.
  *
- * Exports: uploadExcel
+ * Exports: uploadExcel, uploadDocument
  * Used by: 8 files, e.g. routes/banners.routes.js, routes/blogs.routes.js,
  * routes/brands.routes.js, routes/careers.routes.js
  */
@@ -45,5 +45,18 @@ export const uploadExcel = multer({
     ];
     if (allowed.includes(file.mimetype)) return cb(null, true);
     cb(new Error("Only .xlsx, .xls or .csv files are accepted"), false);
+  },
+});
+
+/**
+ * Employee documents: one file in memory (req.file.buffer), at most 5 MB. The declared type is
+ * only a first filter; the real type is checked from the bytes in employeedocument.service.js.
+ */
+export const uploadDocument = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (["application/pdf", "image/jpeg", "image/png"].includes(file.mimetype)) return cb(null, true);
+    cb(new multer.MulterError("LIMIT_UNEXPECTED_FILE", "file"), false);
   },
 });

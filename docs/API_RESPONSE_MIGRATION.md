@@ -35,3 +35,16 @@ Remove them only after confirming with the team. Search the code for `legacyTopL
 
 The six old error codes the frontends know (`EMAIL_EXISTS`, `INVALID_CREDENTIALS`, `USER_NOT_FOUND`,
 `INVALID_OLD_PASSWORD`, `TOKEN_EXPIRED`, `INVALID_TOKEN`) keep exactly the same status and message.
+
+## 3. Attendance / leave (HR upgrade, 2026-10)
+
+| Endpoint | Before | Now | Frontend change |
+|---|---|---|---|
+| `POST attendance/punch-in`, `punch-out` | times IST-shifted (5h30 ahead), client `punchOutTime` ignored anyway | real UTC from the server clock; same keys plus `attendance` | show times with `timeZone: "Asia/Kolkata"`; drop the `.replace('Z','')` hack |
+| `GET attendance/my-attendance` | whole records array incl. auto Sunday / holiday / leave entries | attendance days only (same keys) + `meta`; leave via `my-leave-requests`, holidays via `holidays`, calendar via `my-calendar` | use `my-calendar` for calendars |
+| `GET attendance/admin/attendances` | nested `$__parent` documents | flat day records with `employee`, paginated | read `data[]` + `meta` |
+| `GET attendance/holidays` | `{ date, reason }` from each employee's records | same keys from the Holiday collection, plus `title`, `type`, `_id` | none |
+| `DELETE attendance/leave-request/:id` | deleted the request | status `CANCELLED`, kept | none |
+| `GET attendance/admin/attendance-approvals/filter` | status in the body of a GET | `?status=` (POST with body also accepted) | send a query param |
+| Errors `ALREADY_PUNCHED_IN`, `ALREADY_PUNCHED_OUT`, `ALREADY_PROCESSED` | 400 | 409 (same codes) | switch on `error.code` |
+| `POST employee/create` | returned the password hash | password hash and tokens removed | none |

@@ -1,444 +1,336 @@
 /**
- * Business logic for employee attendance: punch-in / punch-out, leave, holidays, corrections and
- * admin approvals. Throws AppError subclasses on failure.
+ * Forgot-to-punch-out correction requests (AdminApproval requestType FORGOT_PUNCH_OUT). This is
+ * the ONLY place a client-supplied time is accepted. Rules for a request:
+ *   - the day has a punch-in and no punch-out;
+ *   - the requested time is on the SAME IST date as the punch-in, after it, and not in the future;
+ *   - the day is within the last N days (settings.punchOutCorrectionWindowDays, default 7);
+ *   - only one pending request per day (partial unique index);
+ *   - the payroll month is not finalized.
+ * Approval sets the punch-out and recomputes worked time in one transaction; rejection marks the
+ * day ABSENT (as before). Both sides are notified. Re-exported by attendance.service.js.
  *
  * Exports: sendPunchOutRequestService, getAllPunchOutRequestsForAdminService,
- * updatePunchOutRequestStatusService, getMyPunchOutRequestsService,
- * getAttendanceApprovalsByStatusService
+ * updatePunchOutRequestStatusService, getMyPunchOutRequestsService, getAttendanceApprovalsByStatusService
  * Used by: services/attendance/attendance.service.js
  */
-
-/**
- * Forgot-to-punch-out requests: send, list (own / by status / all for admins), approve or reject. Re-exported by attendance.service.js.
- */
-import Employee from "../../models/employee.model.js";
-import { EmployeeRecord } from "../../models/attendance.model.js";
-import { getISTDateString, getISTNow } from "../../helpers/date.helper.js";
 import { v6 as uuidv6 } from "uuid";
+import AttendanceDay from "../../models/attendanceday.model.js";
 import { AdminApproval } from "../../models/attendanceapproval.model.js";
-import { sendNotification } from "../notification/notification.service.js";
 import { ERROR_CODES } from "../../constants/errorcodes.constant.js";
-import { BadRequestError, ForbiddenError, NotFoundError } from "../../helpers/apperror.helper.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../../helpers/apperror.helper.js";
+import {
+  addDays,
+  formatIst,
+  istDateKey,
+  istDateTimeToUtc,
+  nowUtc,
+  parseClientDateTime,
+} from "../../helpers/istdate.helper.js";
+import { isDuplicateKeyError, runInTransaction } from "../../helpers/transaction.helper.js";
+import { sendNotification } from "../notification/notification.service.js";
 import { logger } from "../../helpers/logger.helper.js";
+import { getPayrollSettings } from "../payroll/payrollsettings.service.js";
+import { assertMonthsOpen } from "../payroll/payrolllock.service.js";
+import { employeeDisplayName, findActiveEmployeeByEmail } from "../employee/employeelookup.service.js";
+import { computeStoredFields } from "./attendancecommon.service.js";
 
-/**
- * Send punch out request.
- *
- * @param {*} user
- * @param {*} requestedPunchOut
- * @returns {Promise<*>}
- * @throws {BadRequestError} 400 when the input breaks a rule.
- * @throws {NotFoundError} 404 when a record does not exist.
- */
-export const sendPunchOutRequestService = async (user, requestedPunchOut) => {
-  const normalizedEmail = user.email.toLowerCase().trim();
-
-  // ===== Validate format =====
-  const hasTime = /T\d{2}:\d{2}/.test(requestedPunchOut) || /\d{2}:\d{2}/.test(requestedPunchOut);
-
-  if (!hasTime) {
-    throw new BadRequestError("Punch-out must include time (format: YYYY-MM-DDTHH:mm or YYYY-MM-DD HH:mm)", {
-      code: ERROR_CODES.INVALID_PUNCH_OUT_FORMAT,
-    });
-  }
-
-  const punchOutTime = new Date(requestedPunchOut);
-  if (isNaN(punchOutTime)) {
-    throw new BadRequestError("Invalid punch-out time format", { code: ERROR_CODES.INVALID_PUNCH_OUT });
-  }
-
-  const now = getISTNow();
-  if (punchOutTime > now) {
-    throw new BadRequestError("Punch-out time cannot be in the future", {
-      code: ERROR_CODES.FUTURE_PUNCH_OUT,
-    });
-  }
-
-  const date = punchOutTime.toISOString().split("T")[0];
-  const today = getISTDateString(now);
-  if (date > today) {
-    throw new BadRequestError("Cannot request punch-out for a future date", {
-      code: ERROR_CODES.FUTURE_DATE,
-    });
-  }
-
-  // ===== Find employee =====
-  const employee = await Employee.findOne({
-    email: normalizedEmail,
-    isDeleted: false,
-  });
-
-  if (!employee) {
-    throw new NotFoundError("Employee not found", { code: ERROR_CODES.EMPLOYEE_NOT_FOUND });
-  }
-
-  // ===== Fetch attendance record =====
-  const empRecord = await EmployeeRecord.findOne({ employee: employee._id });
-  if (!empRecord) {
-    throw new NotFoundError("Attendance not found", { code: ERROR_CODES.RECORD_NOT_FOUND });
-  }
-
-  // ===== Find specific day record =====
-  const record = empRecord.records.find((r) => r.date === date);
-  if (!record) {
-    throw new BadRequestError("No record found for this date", {
-      code: ERROR_CODES.RECORD_NOT_FOUND_FOR_DATE,
-    });
-  }
-
-  if (!record.punchIn) {
-    throw new BadRequestError("No punch-in found for this date", { code: ERROR_CODES.NO_PUNCH_IN });
-  }
-
-  if (record.punchOut) {
-    throw new BadRequestError("Punch-out already exists", { code: ERROR_CODES.ALREADY_PUNCHED_OUT });
-  }
-
-  if (record.dayType.includes("HOLIDAY")) {
-    throw new BadRequestError("This date is a holiday", { code: ERROR_CODES.HOLIDAY_BLOCK });
-  }
-
-  if (record.dayType.includes("LEAVE") && record.leaveDuration === "FULL_DAY") {
-    throw new BadRequestError("You were on full-day leave", { code: ERROR_CODES.FULL_DAY_LEAVE });
-  }
-
-  if (record.requiresAdminApproval) {
-    throw new BadRequestError("Already sent for admin approval", {
-      code: ERROR_CODES.ALREADY_PENDING_APPROVAL,
-    });
-  }
-
-  // ===== Check for duplicate admin request =====
-  const exists = await AdminApproval.findOne({
-    employee: employee._id,
-    requestType: "FORGOT_PUNCH_OUT",
-    recordDate: date,
-    status: "PENDING",
-  });
-
-  if (exists) {
-    throw new BadRequestError("Request already pending", { code: ERROR_CODES.DUPLICATE_REQUEST });
-  }
-
-  // ===== Mark record for admin approval =====
-  record.requiresAdminApproval = true;
-
-  // ===== Create admin approval request =====
-  await AdminApproval.create({
-    approvalId: uuidv6(),
-    employee: employee._id,
-    requestType: "FORGOT_PUNCH_OUT",
-    recordDate: date,
-    requestData: { requestedPunchOut },
-    status: "PENDING",
-  });
-
-  await empRecord.save();
-  /* ===== SEND NOTIFICATION ===== */
-
-  /* ===== SEND NOTIFICATION (with error guard) ===== */
+const notify = async (payload) => {
   try {
-    await sendNotification({
-      sender: employee._id,
-      permission: "attendance.log.update",
-      title: "Punch-Out Approval Request",
-      message: `${employee.firstName} ${employee.lastName} requested punch-out approval for ${date}`,
-      type: "FORGOT_PUNCH_OUT_REQUEST",
-      entityId: employee._id,
-      entityModel: "Employee",
-      metadata: {
-        employeeId: employee.employeeId,
-        employeeName: `${employee.firstName} ${employee.lastName}`,
-        employeeEmail: employee.email,
-        requestDate: date,
-        requestedPunchOut: punchOutTime,
-        requestType: "FORGOT_PUNCH_OUT",
-      },
-    });
-  } catch (notifError) {
-    // Non-fatal: log but don't fail the request
-    logger.error("Notification failed for punch-out request", { error: notifError });
+    await sendNotification(payload);
+  } catch (error) {
+    logger.error("Punch-out request notification failed", { type: payload.type, error });
   }
-
-  return {
-    date,
-    requestedPunchOut,
-    status: "PENDING",
-  };
 };
 
+/** Requested punch-out instant of a request (new field, or the legacy string). */
+const requestedInstantOf = (approval) =>
+  approval.requestedPunchOutAt ||
+  (approval.requestData?.requestedPunchOutAt ? new Date(approval.requestData.requestedPunchOutAt) : null) ||
+  parseClientDateTime(approval.requestData?.requestedPunchOut);
+
+const toPublic = (approval, day = null) => ({
+  approvalId: approval.approvalId,
+  employee: approval.employee,
+  date: approval.recordDate,
+  requestedPunchOut: requestedInstantOf(approval),
+  requestedPunchOutAt: requestedInstantOf(approval),
+  reason: approval.reason || approval.requestData?.reason || null,
+  punchIn: day?.punchIn || null,
+  status: approval.status,
+  note: approval.note || null,
+  rejectionReason: approval.rejectionReason || null,
+  actionBy: approval.actionBy || null,
+  actionAt: approval.actionAt || null,
+  createdAt: approval.createdAt,
+});
+
 /**
- * Get all punch out requests for admin.
- * @returns {Promise<*>}
- */
-export const getAllPunchOutRequestsForAdminService = async () => {
-  const approvals = await AdminApproval.find({
-    requestType: "FORGOT_PUNCH_OUT",
-  })
-    .populate("employee", "firstName lastName email role")
-    .sort({ createdAt: -1 });
-
-  if (!approvals.length) return [];
-
-  return approvals.map((a) => ({
-    approvalId: a.approvalId,
-    employee: a.employee,
-    date: a.recordDate,
-    requestedPunchOut: a.requestData.requestedPunchOut,
-    status: a.status,
-    createdAt: a.createdAt,
-  }));
-};
-
-/**
- * Update punch out request status.
+ * Creates a correction request. Accepts { date, time ("HH:mm" IST), reason } or the older
+ * { requestedPunchOut } (no zone = IST wall time; "Z" / offset = exact instant).
+ * Example: { date: "2026-10-15", time: "18:30", reason: "Forgot" } -> 2026-10-15T13:00:00Z.
  *
- * @param {*} adminUser
- * @param {*} approvalId
- * @param {*} action
- * @param {*} rejectionReason
- * @returns {Promise<*>}
- * @throws {ForbiddenError} 403 when the caller may not do this.
- * @throws {NotFoundError} 404 when a record does not exist.
- * @throws {BadRequestError} 400 when the input breaks a rule.
+ * @param {{ email: string }} user
+ * @param {{ date?: string, time?: string, requestedPunchOut?: string, reason: string }} input
+ * @returns {Promise<object>}
+ * @throws {BadRequestError} 400 INVALID_PUNCH_OUT / FUTURE_PUNCH_OUT / NO_PUNCH_IN /
+ *   CORRECTION_NOT_SAME_DAY / INVALID_PUNCH_OUT_ORDER / CORRECTION_WINDOW_EXCEEDED
+ * @throws {ConflictError} 409 ALREADY_PUNCHED_OUT / DUPLICATE_REQUEST / MONTH_FINALIZED
  */
-export const updatePunchOutRequestStatusService = async (adminUser, approvalId, action, rejectionReason) => {
-  // ===== FIND ADMIN =====
-  const admin = await Employee.findOne({ email: adminUser.email });
-  if (!admin) {
-    throw new ForbiddenError("Admin not found", { code: ERROR_CODES.ADMIN_NOT_FOUND });
+export const sendPunchOutRequestService = async (user, { date, time, requestedPunchOut, reason }) => {
+  const requested = date && time ? istDateTimeToUtc(date, time) : parseClientDateTime(requestedPunchOut);
+  if (!requested) {
+    throw new BadRequestError("Invalid punch-out time", { code: ERROR_CODES.INVALID_PUNCH_OUT });
   }
-  // ===== FIND APPROVAL =====
-  const approval = await AdminApproval.findOne({ approvalId });
-  if (!approval) {
-    throw new NotFoundError("Approval request not found", { code: ERROR_CODES.APPROVAL_NOT_FOUND });
+  const now = nowUtc();
+  if (requested > now) {
+    throw new BadRequestError("Punch-out time cannot be in the future", { code: ERROR_CODES.FUTURE_PUNCH_OUT });
   }
+  const recordDate = date || istDateKey(requested);
+  const employee = await findActiveEmployeeByEmail(user.email);
+  const settings = await getPayrollSettings();
 
-  if (approval.status !== "PENDING") {
-    throw new BadRequestError("Request already processed", { code: ERROR_CODES.ALREADY_PROCESSED });
+  const day = await AttendanceDay.findOne({ employee: employee._id, date: recordDate }).lean();
+  if (!day?.punchIn) {
+    throw new BadRequestError(`No punch-in found on ${recordDate}`, { code: ERROR_CODES.NO_PUNCH_IN });
   }
-
-  const { employee, recordDate, requestData } = approval;
-
-  // ===== FIND EMPLOYEE RECORD =====
-  const record = await EmployeeRecord.findOne({ employee });
-  if (!record) {
-    throw new NotFoundError("Employee record not found", { code: ERROR_CODES.RECORD_NOT_FOUND });
-  }
-
-  const day = record.records.find((r) => r.date === recordDate);
-  if (!day) {
-    throw new NotFoundError("Day record not found", { code: ERROR_CODES.DAY_RECORD_NOT_FOUND });
-  }
-
-  // ===== HANDLE REJECTION =====
-  if (action === "REJECTED") {
-    day.requiresAdminApproval = false;
-    day.adminAdjusted = true;
-    day.punchOut = null;
-    day.totalWorkedTime = {
-      hours: 0,
-      minutes: 0,
-    };
-
-    day.status = day.status.filter((s) => !["PRESENT", "ABSENT", "HALF_DAY", "EARLY_GOING"].includes(s));
-    day.status.push("ABSENT");
-
-    await record.save();
-
-    approval.status = "REJECTED";
-    approval.actionBy = admin._id;
-    approval.actionAt = new Date();
-    approval.rejectionReason = rejectionReason || "Not specified";
-    await approval.save();
-
-    return {
-      approvalId: approval.approvalId,
-      employee: approval.employee,
-      date: recordDate,
-      status: day.status,
-      actionBy: admin.email,
-      actionAt: approval.actionAt,
-      rejectionReason: approval.rejectionReason,
-    };
-  }
-
-  // ===== APPROVAL FLOW =====
-  const requestedPunchOut = requestData?.requestedPunchOut;
-  if (!requestedPunchOut) {
-    throw new BadRequestError("Invalid punch-out request data", { code: ERROR_CODES.INVALID_REQUEST_DATA });
-  }
-
-  if (!day.punchIn) {
-    throw new BadRequestError("Cannot punch-out without punch-in", { code: ERROR_CODES.NO_PUNCH_IN });
-  }
-
   if (day.punchOut) {
-    throw new BadRequestError("Punch-out already exists", { code: ERROR_CODES.PUNCH_OUT_EXISTS });
+    throw new ConflictError("Punch-out already exists for this day", { code: ERROR_CODES.ALREADY_PUNCHED_OUT });
   }
-
-  // ===== APPLY PUNCH-OUT =====
-  const punchOutTime = new Date(requestedPunchOut);
-  if (isNaN(punchOutTime.getTime())) {
-    throw new BadRequestError("Invalid punch-out time", { code: ERROR_CODES.INVALID_TIME });
-  }
-
-  if (punchOutTime < new Date(day.punchIn)) {
-    throw new BadRequestError("Punch-out cannot be before punch-in", { code: ERROR_CODES.INVALID_PUNCH_OUT });
-  }
-
-  day.punchOut = punchOutTime;
-  day.requiresAdminApproval = false;
-  day.adminAdjusted = true;
-
-  // ===== RECOMPUTE STATUS =====
-  const diffMs = punchOutTime - new Date(day.punchIn);
-  const totalMinutes = Math.floor(diffMs / 60000);
-  const totalHours = totalMinutes / 60;
-
-  let newStatus = "PRESENT";
-  const weekday = new Date(day.date).getDay();
-
-  if (weekday === 6) {
-    if (totalMinutes < 330) newStatus = "ABSENT";
-  } else {
-    if (totalHours < 4) newStatus = "ABSENT";
-    else if (totalHours < 6) newStatus = "HALF_DAY";
-    else if (totalHours < 8) newStatus = "EARLY_GOING";
-  }
-
-  day.totalWorkedTime = {
-    hours: Math.floor(totalMinutes / 60),
-    minutes: totalMinutes % 60,
-  };
-
-  day.status = day.status.filter((s) => !["PRESENT", "ABSENT", "HALF_DAY", "EARLY_GOING"].includes(s));
-  day.status.push(newStatus);
-
-  // ===== SAVE =====
-  await record.save();
-
-  approval.status = "APPROVED";
-  approval.actionBy = admin._id;
-  approval.actionAt = new Date();
-  await approval.save();
-
-  /* ---------- NOTIFICATION ---------- */
-  try {
-    await sendNotification({
-      sender: employee?._id,
-      permission: "attendance.log.update",
-      title: "Attendance Log Updated",
-      message: `Attendance log updated for ${employee?.name || "Employee"}`,
-      type: "ATTENDANCE_LOG_UPDATED",
-      entityId: employee?._id,
-      entityModel: "Employee",
+  if (istDateKey(requested) !== day.date) {
+    throw new BadRequestError("Punch-out must be on the same day as the punch-in", {
+      code: ERROR_CODES.CORRECTION_NOT_SAME_DAY,
     });
-  } catch (err) {
-    logger.error("Notification failed on Attendance log update", { error: err.message });
+  }
+  if (requested <= new Date(day.punchIn)) {
+    throw new BadRequestError("Punch-out must be after the punch-in", { code: ERROR_CODES.INVALID_PUNCH_OUT_ORDER });
+  }
+  const today = istDateKey(now);
+  if (day.date < addDays(today, -settings.punchOutCorrectionWindowDays)) {
+    throw new BadRequestError(
+      `Corrections are allowed only for the last ${settings.punchOutCorrectionWindowDays} days`,
+      { code: ERROR_CODES.CORRECTION_WINDOW_EXCEEDED }
+    );
+  }
+  await assertMonthsOpen([day.date]);
+
+  let approval;
+  try {
+    approval = await runInTransaction(async (session) => {
+      const [created] = await AdminApproval.create(
+        [
+          {
+            approvalId: uuidv6(),
+            employee: employee._id,
+            requestType: "FORGOT_PUNCH_OUT",
+            recordDate: day.date,
+            requestData: { requestedPunchOut: requested.toISOString(), requestedPunchOutAt: requested.toISOString(), reason },
+            requestedPunchOutAt: requested,
+            reason,
+            status: "PENDING",
+          },
+        ],
+        { session }
+      );
+      await AttendanceDay.updateOne({ _id: day._id }, { $set: { requiresAdminApproval: true } }, { session });
+      return created;
+    });
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw new ConflictError("A correction request for this day is already pending", {
+        code: ERROR_CODES.DUPLICATE_REQUEST,
+      });
+    }
+    throw error;
   }
 
+  await notify({
+    sender: employee._id,
+    permission: "attendance.log.update",
+    title: "Punch-Out Correction Request",
+    message: `${employeeDisplayName(employee)} requested punch-out at ${formatIst(requested)} for ${day.date}`,
+    type: "FORGOT_PUNCH_OUT_REQUEST",
+    entityId: approval.approvalId,
+    entityModel: "AdminApproval",
+    metadata: { approvalId: approval.approvalId, employeeEmail: employee.email, requestDate: day.date, requestedPunchOut: requested, reason },
+  });
+
+  return { ...toPublic(approval.toObject(), day), status: "PENDING" };
+};
+
+/**
+ * Admin list of correction requests, newest first, paginated. Optional status filter.
+ *
+ * @param {{ status?: string, skip: number, limit: number }} query
+ * @returns {Promise<{ items: object[], total: number }>}
+ */
+export const getAllPunchOutRequestsForAdminService = async ({ status, skip, limit }) => {
+  const filter = { requestType: "FORGOT_PUNCH_OUT", ...(status ? { status } : {}) };
+  const [approvals, total] = await Promise.all([
+    AdminApproval.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("employee", "firstName lastName email role")
+      .populate("actionBy", "firstName lastName email")
+      .lean(),
+    AdminApproval.countDocuments(filter),
+  ]);
+  const days = await AttendanceDay.find({
+    $or: approvals.map((approval) => ({ employee: approval.employee?._id, date: approval.recordDate })),
+  })
+    .select("employee date punchIn")
+    .lean()
+    .catch(() => []);
+  const dayKey = (employeeId, date) => `${employeeId}:${date}`;
+  const dayByKey = new Map(days.map((day) => [dayKey(day.employee, day.date), day]));
   return {
-    approvalId: approval.approvalId,
-    employee,
-    date: recordDate,
-    punchOut: punchOutTime,
-    worked: day.totalWorkedTime,
-    status: day.status,
-    actionBy: admin.email,
-    actionAt: approval.actionAt,
+    items: approvals.map((approval) => toPublic(approval, dayByKey.get(dayKey(approval.employee?._id, approval.recordDate)))),
+    total,
   };
 };
 
 /**
- * Get my punch out requests.
+ * Approves or rejects a correction. Idempotent: only a PENDING request can be decided, and the
+ * status change is conditional, so a double click cannot apply it twice.
  *
- * @param {*} email
- * @returns {Promise<*>}
- * @throws {NotFoundError} 404 when a record does not exist.
+ * @param {{ email: string }} adminUser
+ * @param {string} approvalId
+ * @param {"APPROVED" | "REJECTED"} action
+ * @param {{ note?: string, rejectionReason?: string }} [extra]
+ * @returns {Promise<object>}
+ * @throws {NotFoundError} 404 APPROVAL_NOT_FOUND / DAY_RECORD_NOT_FOUND
+ * @throws {ConflictError} 409 ALREADY_PROCESSED / ALREADY_PUNCHED_OUT / MONTH_FINALIZED
+ * @throws {BadRequestError} 400 INVALID_REQUEST_DATA / INVALID_PUNCH_OUT_ORDER
+ */
+export const updatePunchOutRequestStatusService = async (adminUser, approvalId, action, extra = {}) => {
+  const admin = await findActiveEmployeeByEmail(adminUser.email);
+  const approval = await AdminApproval.findOne({ approvalId, requestType: "FORGOT_PUNCH_OUT" }).lean();
+  if (!approval) throw new NotFoundError("Approval request not found", { code: ERROR_CODES.APPROVAL_NOT_FOUND });
+  if (approval.status !== "PENDING") {
+    throw new ConflictError("Request already processed", { code: ERROR_CODES.ALREADY_PROCESSED });
+  }
+  const day = await AttendanceDay.findOne({ employee: approval.employee, date: approval.recordDate }).lean();
+  if (!day) throw new NotFoundError("Day record not found", { code: ERROR_CODES.DAY_RECORD_NOT_FOUND });
+  if (day.punchOut) throw new ConflictError("Punch-out already exists", { code: ERROR_CODES.ALREADY_PUNCHED_OUT });
+  await assertMonthsOpen([day.date]);
+
+  const decidedAt = nowUtc();
+  const decision = {
+    status: action,
+    actionBy: admin._id,
+    actionAt: decidedAt,
+    note: extra.note || null,
+    rejectionReason: action === "REJECTED" ? extra.rejectionReason || extra.note || "Not specified" : null,
+  };
+
+  let dayUpdate;
+  if (action === "APPROVED") {
+    const requested = requestedInstantOf(approval);
+    if (!requested || Number.isNaN(requested.getTime())) {
+      throw new BadRequestError("Invalid punch-out request data", { code: ERROR_CODES.INVALID_REQUEST_DATA });
+    }
+    if (requested <= new Date(day.punchIn)) {
+      throw new BadRequestError("Punch-out cannot be before punch-in", { code: ERROR_CODES.INVALID_PUNCH_OUT_ORDER });
+    }
+    const settings = await getPayrollSettings();
+    const fields = await computeStoredFields({ employeeId: day.employee, date: day.date, punchIn: day.punchIn, punchOut: requested, settings });
+    dayUpdate = {
+      punchOut: requested,
+      punchOutSource: "CORRECTION",
+      correctionApprovalId: approvalId,
+      requiresAdminApproval: false,
+      adminAdjusted: true,
+      ...fields,
+    };
+  } else {
+    dayUpdate = { status: "ABSENT", requiresAdminApproval: false, adminAdjusted: true, correctionApprovalId: approvalId };
+  }
+
+  const updatedDay = await runInTransaction(async (session) => {
+    const claimed = await AdminApproval.updateOne({ approvalId, status: "PENDING" }, { $set: decision }, { session });
+    if (claimed.modifiedCount !== 1) {
+      throw new ConflictError("Request already processed", { code: ERROR_CODES.ALREADY_PROCESSED });
+    }
+    return AttendanceDay.findOneAndUpdate({ _id: day._id, punchOut: null }, { $set: dayUpdate }, { new: true, session }).lean();
+  });
+
+  await notify({
+    receivers: [approval.employee],
+    sender: admin._id,
+    title: action === "APPROVED" ? "Punch-Out Correction Approved" : "Punch-Out Correction Rejected",
+    message:
+      action === "APPROVED"
+        ? `Your punch-out for ${day.date} was set to ${formatIst(dayUpdate.punchOut)}`
+        : `Your punch-out correction for ${day.date} was rejected${decision.rejectionReason ? `: ${decision.rejectionReason}` : ""}`,
+    type: "ATTENDANCE_LOG_UPDATED",
+    entityId: approvalId,
+    entityModel: "AdminApproval",
+    metadata: { approvalId, date: day.date, status: action },
+  });
+
+  return {
+    approvalId,
+    employee: approval.employee,
+    date: day.date,
+    punchOut: updatedDay?.punchOut || null,
+    worked: { hours: Math.floor((updatedDay?.workedMinutes || 0) / 60), minutes: (updatedDay?.workedMinutes || 0) % 60 },
+    workedMinutes: updatedDay?.workedMinutes || 0,
+    attendanceStatus: updatedDay?.status,
+    status: action,
+    note: decision.note,
+    rejectionReason: decision.rejectionReason,
+    actionBy: admin.email,
+    actionAt: decidedAt,
+  };
+};
+
+/**
+ * The logged-in employee's correction requests, newest first.
+ *
+ * @param {string} email
+ * @returns {Promise<object[]>}
  */
 export const getMyPunchOutRequestsService = async (email) => {
-  // Find employee
-  const employee = await Employee.findOne({ email, isDeleted: false });
-  if (!employee) {
-    throw new NotFoundError("Employee not found");
-  }
-
-  // Fetch punch-out requests
-  const requests = await AdminApproval.find({
-    employee: employee._id,
-    requestType: "FORGOT_PUNCH_OUT",
-  }).sort({ createdAt: -1 });
-  /* ---------- NOTIFICATION ---------- */
-  try {
-    await sendNotification({
-      sender: employee?._id,
-      permission: "attendance.log.update",
-      title: "Forget to Punch-Out Request",
-      message: `Forget to Punch-Out requested for ${employee?.name || "Employee"}`,
-      type: "FORGOT_PUNCH_OUT_REQUESTED",
-      entityId: employee?._id,
-      entityModel: "Employee",
-      metadata: {
-        createdBy: employee?.email || null,
-      },
-    });
-  } catch (err) {
-    logger.error("Notification failed for forgot punch-out request", { error: err.message });
-  }
-
-  // Format response
-  return requests.map((r) => ({
-    approvalId: r.approvalId,
-    date: r.recordDate,
-    requestedPunchOut: r.requestData.requestedPunchOut,
-    status: r.status,
-    actionBy: r.actionBy,
-    actionAt: r.actionAt,
-    createdAt: r.createdAt,
-  }));
+  const employee = await findActiveEmployeeByEmail(email);
+  const requests = await AdminApproval.find({ employee: employee._id, requestType: "FORGOT_PUNCH_OUT" })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .lean();
+  return requests.map((request) => toPublic(request));
 };
 
 /**
- * Get attendance approvals by status.
+ * All approval requests (leave and punch-out) filtered by status, for admins. Paginated.
  *
- * @param {*} email
- * @param {*} status
- * @returns {Promise<*>}
- * @throws {ForbiddenError} 403 when the caller may not do this.
+ * @param {{ status?: string, skip?: number, limit?: number }} query
+ * @returns {Promise<{ items: object[], total: number }>}
  */
-export const getAttendanceApprovalsByStatusService = async (email, status) => {
-  // ===== VERIFY ADMIN =====
-  const admin = await Employee.findOne({ email });
-  if (!admin) {
-    throw new ForbiddenError("Unauthorized", { code: ERROR_CODES.UNAUTHORIZED });
-  }
-
-  // ===== BUILD FILTER =====
-  const filter = {};
-  if (status) {
-    filter.status = status;
-  }
-
-  // ===== FETCH APPROVALS =====
-  const approvals = await AdminApproval.find(filter)
-    .populate("employee", "firstName lastName email role")
-    .populate("actionBy", "firstName lastName email")
-    .sort({ createdAt: -1 });
-
-  if (!approvals.length) return [];
-
-  // ===== FORMAT RESPONSE =====
-  return approvals.map((doc) => ({
-    approvalId: doc.approvalId,
-    employee: doc.employee,
-    requestType: doc.requestType,
-    recordDate: doc.recordDate,
-    requestData: doc.requestData,
-    status: doc.status,
-    actionBy: doc.actionBy,
-    actionAt: doc.actionAt,
-    rejectionReason: doc.rejectionReason,
-    createdAt: doc.createdAt,
-  }));
+export const getAttendanceApprovalsByStatusService = async ({ status, skip = 0, limit = 50 }) => {
+  const filter = status ? { status } : {};
+  const [approvals, total] = await Promise.all([
+    AdminApproval.find(filter)
+      .populate("employee", "firstName lastName email role")
+      .populate("actionBy", "firstName lastName email")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    AdminApproval.countDocuments(filter),
+  ]);
+  return {
+    items: approvals.map((doc) => ({
+      approvalId: doc.approvalId,
+      employee: doc.employee,
+      requestType: doc.requestType,
+      recordDate: doc.recordDate,
+      requestData: doc.requestData,
+      status: doc.status,
+      actionBy: doc.actionBy,
+      actionAt: doc.actionAt,
+      note: doc.note || null,
+      rejectionReason: doc.rejectionReason,
+      createdAt: doc.createdAt,
+    })),
+    total,
+  };
 };

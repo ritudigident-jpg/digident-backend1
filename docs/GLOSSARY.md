@@ -85,3 +85,16 @@ A lead moves through `stage` values: `inquiry` -> `followup` -> `client`, or to 
 | Career / Job application | Open jobs and the application form (with resume upload). |
 | Testimonial | A customer quote shown on the home page and /testimonials. |
 | Product pages | ScanBody, ScanBridge, Abutment, Screw, LabAnalog: the dental implant parts Digident sells. |
+
+## Attendance, leave and payroll
+
+| Word | Meaning |
+|---|---|
+| Attendance day | One punch-in / punch-out of one employee on one IST date (`attendance_days`). |
+| IST date | The calendar date in India (Asia/Kolkata). Times are stored in UTC; the day is always the IST date. |
+| Expected hours | 8h Monday-Friday (or the employee's own shift), 6h on Saturday (09:00-15:00), half of that on a half-day leave, 0 on Sundays / holidays. |
+| Missing punch-out (`MISSING_PUNCH_OUT`) | A day with a punch-in but no punch-out at 23:55 IST. Pending until a correction is approved (or rejected = absent). |
+| Correction request | The employee's "I left at HH:mm" request for a missing punch-out; an admin approves or rejects it. |
+| Extra time | Minutes beyond the expected hours (from 30 min), and all time on Sundays / holidays. Paid at perHour x multiplier. |
+| Paid leave quota | Paid leave days per month shared by sick and casual leave (default 1). Beyond it, leave is unpaid. |
+| Live / finalized month | A live month is recalculated on every view; finalizing stores an immutable snapshot and locks the month until re-opened. |

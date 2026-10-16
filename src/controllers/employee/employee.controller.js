@@ -94,7 +94,12 @@ export const createEmployee = asyncHandler(async (req, res) => {
     throw ValidationError.fromJoi(error);
   }
   const employee = await createEmployeeService(value, req.user.email);
-  return sendCreated(res, { data: employee, message: "Employee created successfully" });
+  // Never send the password hash or reset / verification tokens back to the browser.
+  const safeEmployee = employee.toObject();
+  delete safeEmployee.password;
+  delete safeEmployee.resetPasswordToken;
+  delete safeEmployee.emailVerificationToken;
+  return sendCreated(res, { data: safeEmployee, message: "Employee created successfully" });
 });
 
 /**

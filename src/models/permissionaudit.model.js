@@ -46,6 +46,13 @@ const permissionAuditSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  /** Extra context for HR audit entries (salary / bank changes, document views). Never secrets. */
+  details: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
 });
+
+permissionAuditSchema.index({ timestamp: -1 });
 
 export const PermissionAudit = mongoose.model("PermissionAudit", permissionAuditSchema);
