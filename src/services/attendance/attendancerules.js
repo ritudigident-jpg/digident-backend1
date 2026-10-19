@@ -24,10 +24,15 @@ const MONTH_KEY_LENGTH = 7;
  * @param {object} [stored]
  * @returns {typeof DEFAULT_PAYROLL_SETTINGS}
  */
+
+
 export const mergeSettings = (stored = {}) => {
   const merged = { ...DEFAULT_PAYROLL_SETTINGS };
   for (const key of Object.keys(DEFAULT_PAYROLL_SETTINGS)) {
-    if (stored[key] !== undefined && stored[key] !== null) merged[key] = stored[key];
+    const value = stored[key];
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue; // empty array = not set (old Mongoose default)
+    merged[key] = value;
   }
   return merged;
 };
