@@ -42,7 +42,7 @@ export const salaryProfileSchema = Joi.object({
 export const extraApprovalSchema = Joi.object({ approved: Joi.boolean().required() });
 
 export const payrollSettingsSchema = Joi.object({
-  weeklyOffDays: Joi.array().items(Joi.number().integer().min(0).max(6)).unique().max(3),
+ weeklyOffDays: Joi.array().items(Joi.number().integer().min(0).max(6)).unique().min(1).max(3),
   standardShiftMinutes: Joi.number().integer().min(60).max(960),
   saturdayShiftMinutes: Joi.number().integer().min(60).max(960),
   lateAfterTime: time,
