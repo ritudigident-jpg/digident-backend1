@@ -74,6 +74,7 @@ import manualOrderRoutes from "./routes/manualorders.routes.js";
 import creditNoteRoutes from "./routes/creditnotes.routes.js";
 import payrollRoutes from "./routes/payroll.routes.js";
 import employeeProfileRoutes from "./routes/employeeprofile.routes.js";
+import taskRoutes from "./routes/task.routes.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -142,6 +143,7 @@ app.use("/api/v1/credit-note", creditNoteRoutes);
 app.use("/api/v1/testimonial", testimonialRoutes);
 app.use("/api/v1/payroll", payrollRoutes);
 app.use("/api/v1/employee-profile", employeeProfileRoutes);
+app.use("/api/v1/task", taskRoutes);
 
 /* ----------------------- Error handling (always last) --------------------- */
 app.use(notFoundHandler);
